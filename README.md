@@ -4,7 +4,10 @@
 
 An advanced, yet simple, tunneling tool that uses a TUN interface.
 
+[by TNP IT Security](https://tnpitsecurity.com/)
+
 [![GPLv3](https://img.shields.io/badge/License-GPLv3-brightgreen.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Go Report](https://goreportcard.com/badge/github.com/tnpitsecurity/ligolo-ng)](https://goreportcard.com/report/github.com/tnpitsecurity/ligolo-ng)
 
 ## Table of Contents
 
