@@ -49,7 +49,7 @@ tunnels from a reverse TCP/TLS connection without the need of SOCKS.
 
 Instead of using a SOCKS proxy or TCP/UDP forwarders, **Ligolo-ng** creates a userland network stack using [Gvisor](https://gvisor.dev/).
 
-When running the *relay/proxy* server, a *tun* interface is used, and packets sent to this interface are
+When running the *relay/proxy* server, a **tun** interface is used, and packets sent to this interface are
 translated, then transmitted to the *agent* remote network.
 
 Example, for a TCP connection:
@@ -197,7 +197,9 @@ INFO[1505] Listener closed.
 
 ## Demo
 
-...
+
+https://user-images.githubusercontent.com/31402213/127328691-e063e3f2-dbd9-43c6-bd12-08065a6d260f.mp4
+
 
 ## Does it require Administrator/root access ?
 
