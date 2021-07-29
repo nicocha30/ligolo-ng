@@ -44,13 +44,15 @@ func main() {
 		logrus.Fatal("invalid connect address, please using host:port")
 	}
 
+	var tlsConfig tls.Config
 	if *ignoreCertificate {
 		logrus.Warn("warning, certificate validation disabled")
+		tlsConfig.InsecureSkipVerify = true
 	}
 
 	listenerConntrack = make(map[int32]net.Conn)
 	listenerMap = make(map[int32]net.Listener)
-	dialer, err := tls.Dial("tcp", *serverAddr, &tls.Config{})
+	dialer, err := tls.Dial("tcp", *serverAddr, &tlsConfig)
 	if err != nil {
 		logrus.Fatal(err)
 	}

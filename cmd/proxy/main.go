@@ -17,6 +17,7 @@ func main() {
 	var tunInterface = flag.String("tun", "ligolo", "tun interface name")
 	var listenInterface = flag.String("laddr", "0.0.0.0:11601", "listening address ")
 	var enableAutocert = flag.Bool("autocert", false, "automatically request letsencrypt certificates, requires port 80 to be accessible")
+	var enableSelfcert = flag.Bool("selfcert", false, "dynamically generate self-signed certificates")
 	var certFile = flag.String("certfile", "certs/cert.pem", "TLS server certificate")
 	var keyFile = flag.String("keyfile", "certs/key.pem", "TLS server key")
 	var domainWhitelist = flag.String("allow-domains", "", "autocert authorised domains, if empty, allow all domains, multiple domains should be comma-separated.")
@@ -38,6 +39,7 @@ func main() {
 
 	proxyController := proxy.New(proxy.ControllerConfig{
 		EnableAutocert:  *enableAutocert,
+		EnableSelfcert:  *enableSelfcert,
 		Address:         *listenInterface,
 		Certfile:        *certFile,
 		Keyfile:         *keyFile,
@@ -62,7 +64,7 @@ func main() {
 			agent, err := proxy.NewAgent(yamuxConn)
 			if err != nil {
 				logrus.Errorf("could not register agent, error: %v", err)
-				break
+				continue
 			}
 
 			logrus.WithFields(logrus.Fields{"remote": remoteConn.RemoteAddr(), "name": agent.Name}).Info("Agent joined.")
