@@ -20,8 +20,10 @@ An advanced, yet simple, tunneling tool that uses a TUN interface.
 - [Building & Usage](#building--usage)
   - [Building Ligolo-ng](#building-ligolo-ng)
   - [Setup Ligolo-ng](#setup-ligolo-ng)
-  - [Self signed certificates (NOT RECOMMENDED)](#self-signed-certificates-not-recommended)
-  - [Using Ligolo-ng](#using-ligolo-ng)
+  - [TLS Options](#tls-options)
+    - [Using Let's Encrypt Autocert](#using-lets-encrypt-autocert)
+    - [Using your own TLS certificates](#using-your-own-tls-certificates)
+    - [Automatic self-signed certificates (NOT RECOMMENDED)](#automatic-self-signed-certificates-not-recommended)
   - [Agent Binding/Listening](#agent-bindinglistening)
 - [Demo](#demo)
 - [Does it require Administrator/root access ?](#does-it-require-administratorroot-access-)
@@ -29,6 +31,7 @@ An advanced, yet simple, tunneling tool that uses a TUN interface.
 - [Performance](#performance)
 - [Caveats](#caveats)
 - [Todo](#todo)
+- [Credits](#credits)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -42,7 +45,7 @@ tunnels from a reverse TCP/TLS connection without the need of SOCKS.
 - Tun interface (No more SOCKS!)
 - Simple UI with *agent* selection and *network information*
 - Easy to use and setup
-- Automatic certificate configuration with LetsEncrypt
+- Automatic certificate configuration with Let's Encrypt
 - Performant (Multiplexing)
 - Does not require high privileges
 - Socket listening/binding on the *agent*
@@ -87,19 +90,25 @@ $ ./proxy -h # Help options
 $ ./proxy -autocert # Automatically request LetsEncrypt certificates
 ```
 
-When using `-autocert`, the proxy will automatically request a certificate (using Letsencrypt) for *attacker_c2_server.com* when an agent connects.
+### TLS Options
 
-### Self-signed certificates (NOT RECOMMENDED)
+#### Using Let's Encrypt Autocert
+
+When using the `-autocert` option, the proxy will automatically request a certificate (using Let's Encrypt) for *attacker_c2_server.com* when an agent connects.
+
+> Port 80 needs to be accessible for Let's Encrypt certificate validation/retrieval
+
+#### Using your own TLS certificates
 
 If you want to use your own certificates for the proxy server, you can use the `-certfile` and `-keyfile` parameters.
 
-Self-signed certificates can be generated using the following command:
+#### Automatic self-signed certificates (NOT RECOMMENDED)
 
-```
-# NOT RECOMMENDED! Don't use self-signed certificates.
-$ go run `go env GOROOT`/src/crypto/tls/generate_cert.go -ecdsa-curve P256 -ed25519 -host yourhostname.com
-```
+The *proxy/relay* can automatically generate self-signed TLS certificates using the `-selfcert` option.
 
+The `-ignore-cert` option needs to be used with the *agent*.
+
+> Beware of man-in-the-middle attacks! This option should only be used in a test environment or for debugging purposes.
 ### Using Ligolo-ng
 
 
@@ -251,7 +260,8 @@ When using *nmap*, you should use `--unprivileged` or `-PE` to avoid false posit
 
 - Implement other ICMP error messages (this will speed up UDP scans) ;
 - Do not *RST* when receiving an *ACK* from an invalid TCP connection (nmap will report the host as up) ;
-- Implement multi-platform *proxy*.
+- Implement multi-platform *proxy* ;
+- Add mTLS support.
 
 ## Credits
 
