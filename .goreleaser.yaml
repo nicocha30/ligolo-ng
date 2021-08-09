@@ -1,0 +1,51 @@
+project_name: ligolo-ng
+builds:
+  - main: ./cmd/agent
+    id: "agent"
+    binary: agent
+    env: [CGO_ENABLED=0]
+    goos:
+      - linux
+      - darwin
+      - windows
+
+  - main: ./cmd/proxy
+    id: "proxy"
+    binary: proxy
+    env: [CGO_ENABLED=0]
+    goos:
+      - linux
+archives:
+  - 
+    id: "proxy"
+    builds: ['proxy']
+    name_template: "{{ .ProjectName }}_{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}"
+    replacements:
+      amd64: 64bit
+      386: 32bit
+      arm: ARM
+      arm64: ARM64
+      darwin: macOS
+      linux: Linux
+      windows: Windows
+    format_overrides:
+      - goos: windows
+        format: zip
+  - 
+    id: "agent"
+    builds: ['agent']
+    name_template: "{{ .ProjectName }}_{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}"
+    replacements:
+      amd64: 64bit
+      386: 32bit
+      arm: ARM
+      arm64: ARM64
+      darwin: macOS
+      linux: Linux
+      windows: Windows
+    format_overrides:
+      - goos: windows
+        format: zip
+release:
+  github:
+  disable: false
