@@ -1,19 +1,17 @@
 package netstack
 
 import (
+	"fmt"
 	"github.com/sirupsen/logrus"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
-	"gvisor.dev/gvisor/pkg/tcpip/link/fdbased"
-	"gvisor.dev/gvisor/pkg/tcpip/link/rawfile"
-	"gvisor.dev/gvisor/pkg/tcpip/link/tun"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
-	"log"
+	"ligolo-ng/pkg/proxy/netstack/tun"
 	"sync"
 )
 
@@ -104,20 +102,6 @@ func (s *NetStack) SetConnPool(connPool *ConnPool) {
 
 // New creates a new userland network stack (using Gvisor) that listen on a tun interface.
 func (s *NetStack) new(tunName string) *stack.Stack {
-	mtu, err := rawfile.GetMTU(tunName)
-	if err != nil {
-		logrus.Fatal(err)
-	}
-
-	fd, err := tun.Open(tunName)
-	if err != nil {
-		logrus.Fatal(err)
-	}
-
-	linkEP, err := fdbased.New(&fdbased.Options{FDs: []int{fd}, MTU: mtu})
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Create a new gvisor userland network stack.
 	ns := stack.New(stack.Options{
@@ -187,9 +171,13 @@ func (s *NetStack) new(tunName string) *stack.Stack {
 	ns.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpHandler.HandlePacket)
 	ns.SetTransportProtocolHandler(udp.ProtocolNumber, udpHandler.HandlePacket)
 
+	linkEP, err := tun.Open(tunName)
+	if err != nil {
+		panic(fmt.Errorf("tun.Open: %v", err))
+	}
 	// Create a new NIC
 	if err := ns.CreateNIC(1, linkEP); err != nil {
-		panic(err)
+		panic(fmt.Errorf("CreateNIC: %v", err))
 	}
 
 	// Start a endpoint that will reply to ICMP echo queries

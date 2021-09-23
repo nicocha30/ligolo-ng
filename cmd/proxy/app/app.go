@@ -299,7 +299,7 @@ func Run(tuniface string) {
 	App.AddCommand(&grumble.Command{
 		Name:      "listener_add",
 		Help:      "Listen on the agent and redirect connections to the desired address",
-		Usage:     "listener_add --laddr [agent_listening_address:port] --to [local_listening_address:port] --tcp/--udp",
+		Usage:     "listener_add --addr [agent_listening_address:port] --to [local_listening_address:port] --tcp/--udp",
 		HelpGroup: "Listeners",
 		Flags: func(f *grumble.Flags) {
 			f.BoolL("tcp", false, "Use TCP listener")

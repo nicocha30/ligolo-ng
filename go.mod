@@ -11,5 +11,6 @@ require (
 	github.com/sirupsen/logrus v1.8.1
 	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83
 	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c // indirect
-	gvisor.dev/gvisor v0.0.0-20210713054152-3ea4ea9e2d5f
+	golang.zx2c4.com/wireguard v0.0.0-20210905140043-2ef39d47540c
+	gvisor.dev/gvisor v0.0.0-20210923032606-0801d469950e
 )

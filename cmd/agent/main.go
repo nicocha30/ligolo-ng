@@ -27,6 +27,8 @@ var listenerID int32
 func main() {
 	var ignoreCertificate = flag.Bool("ignore-cert", false, "ignore TLS certificate validation (dangerous), only for debug purposes")
 	var verbose = flag.Bool("v", false, "enable verbose mode")
+	var retry = flag.Bool("retry", false, "auto-retry on error")
+
 	var serverAddr = flag.String("connect", "", "the target domain:port")
 
 	flag.Parse()
@@ -52,25 +54,41 @@ func main() {
 
 	listenerConntrack = make(map[int32]net.Conn)
 	listenerMap = make(map[int32]net.Listener)
-	dialer, err := tls.Dial("tcp", *serverAddr, &tlsConfig)
+
+
+	for {
+		err := connect(*serverAddr, &tlsConfig)
+		logrus.Errorf("Connection error: %v", err)
+		if *retry {
+			logrus.Info("Retrying in 5 seconds.")
+			time.Sleep(5 * time.Second)
+		} else {
+			logrus.Fatal(err)
+		}
+	}
+}
+
+func connect(addr string, config *tls.Config) error {
+
+	dialer, err := tls.Dial("tcp", addr, config)
 	if err != nil {
-		logrus.Fatal(err)
+		return err
 	}
 
 	yamuxConn, err := yamux.Server(dialer, yamux.DefaultConfig())
 	if err != nil {
-		logrus.Fatal(err)
+		return err
 	}
+
+	logrus.WithFields(logrus.Fields{"addr": dialer.RemoteAddr()}).Info("Connection established")
 
 	for {
 		conn, err := yamuxConn.Accept()
 		if err != nil {
-			logrus.Error(err)
-			return
+			return err
 		}
 		go handleConn(conn)
 	}
-
 }
 
 // Listener is the base class implementing listener sockets for Ligolo

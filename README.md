@@ -18,8 +18,12 @@ An advanced, yet simple, tunneling tool that uses a TUN interface.
 - [Features](#features)
 - [How is this different from Ligolo/Chisel/Meterpreter... ?](#how-is-this-different-from-ligolochiselmeterpreter-)
 - [Building & Usage](#building--usage)
+  - [Precompiled binaries](#precompiled-binaries)
   - [Building Ligolo-ng](#building-ligolo-ng)
   - [Setup Ligolo-ng](#setup-ligolo-ng)
+    - [Linux](#linux)
+    - [Windows](#windows)
+    - [Running Ligolo-ng proxy server](#running-ligolo-ng-proxy-server)
   - [TLS Options](#tls-options)
     - [Using Let's Encrypt Autocert](#using-lets-encrypt-autocert)
     - [Using your own TLS certificates](#using-your-own-tls-certificates)
@@ -38,11 +42,11 @@ An advanced, yet simple, tunneling tool that uses a TUN interface.
 ## Introduction
 
 **Ligolo-ng** is a *simple*, *lightweight* and *fast* tool that allows pentesters to establish
-tunnels from a reverse TCP/TLS connection without the need of SOCKS.
+tunnels from a reverse TCP/TLS connection using a **tun interface** (without the need of SOCKS).
 
 ## Features
 
-- Tun interface (No more SOCKS!)
+- **Tun interface** (No more SOCKS!)
 - Simple UI with *agent* selection and *network information*
 - Easy to use and setup
 - Automatic certificate configuration with Let's Encrypt
@@ -69,23 +73,41 @@ This allows running tools like *nmap* without the use of *proxychains* (simpler 
 
 ## Building & Usage
 
+### Precompiled binaries
+
+Precompiled binaries (Windows/Linux/macOS) are available on the [Release page](https://github.com/tnpitsecurity/ligolo-ng/releases).
+
 ### Building Ligolo-ng
 Building *ligolo-ng*:
 
 ```shell
 $ go build -o agent cmd/agent/main.go
 $ go build -o proxy cmd/proxy/main.go
-# Build agent for Windows
+# Build for Windows
 $ GOOS=windows go build -o agent.exe cmd/agent/main.go
+$ GOOS=windows go build -o proxy.exe cmd/proxy/main.go
 ```
 
 ### Setup Ligolo-ng
 
-Start the *proxy* server on your Command and Control (C2) server (default 11601 listening will be use):
+#### Linux
+
+When using Linux, you need to create a tun interface on the Proxy Server (C2):
 
 ```shell
 $ sudo ip tuntap add user [your_username] mode tun ligolo
 $ sudo ip link set ligolo up
+```
+
+#### Windows
+
+You need to download the [Wintun](https://www.wintun.net/) driver (used by [WireGuard](https://www.wireguard.com/)) and place the `wintun.dll` in the same folder as Ligolo (make sure you use the right architecture).
+
+#### Running Ligolo-ng proxy server
+
+Start the *proxy* server on your Command and Control (C2) server (default port 11601):
+
+```shell
 $ ./proxy -h # Help options
 $ ./proxy -autocert # Automatically request LetsEncrypt certificates
 ```
@@ -149,8 +171,20 @@ Display the network configuration of the agent using the `ifconfig` command:
 
 Add a route on the *proxy/relay* server to the *192.168.0.0/24* *agent* network.
 
+*Linux*:
 ```shell
 $ sudo ip route add 192.168.0.0/24 dev ligolo
+```
+
+*Windows*:
+```
+> netsh int ipv4 show interfaces
+
+Idx     Mét         MTU          État                Nom
+---  ----------  ----------  ------------  ---------------------------
+ 25           5       65535  connected     ligolo
+   
+> route add 192.168.0.0 mask 255.255.255.0 0.0.0.0 if [THE INTERFACE IDX]
 ```
 
 Start the tunnel on the proxy:
@@ -260,7 +294,7 @@ When using *nmap*, you should use `--unprivileged` or `-PE` to avoid false posit
 
 - Implement other ICMP error messages (this will speed up UDP scans) ;
 - Do not *RST* when receiving an *ACK* from an invalid TCP connection (nmap will report the host as up) ;
-- Implement multi-platform *proxy* ;
+- Implement *proxy* support for Darwin ;
 - Add mTLS support.
 
 ## Credits
