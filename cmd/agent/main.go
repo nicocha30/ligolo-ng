@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/hashicorp/yamux"
 	"github.com/sirupsen/logrus"
+	goproxy "golang.org/x/net/proxy"
 	"ligolo-ng/pkg/agent/neterror"
 	"ligolo-ng/pkg/agent/smartping"
 	"ligolo-ng/pkg/protocol"
@@ -25,11 +26,14 @@ var connTrackID int32
 var listenerID int32
 
 func main() {
+	var tlsConfig tls.Config
 	var ignoreCertificate = flag.Bool("ignore-cert", false, "ignore TLS certificate validation (dangerous), only for debug purposes")
 	var verbose = flag.Bool("v", false, "enable verbose mode")
 	var retry = flag.Bool("retry", false, "auto-retry on error")
-
-	var serverAddr = flag.String("connect", "", "the target domain:port")
+	var socksProxy = flag.String("socks", "", "socks5 proxy address (ip:port)")
+	var socksUser = flag.String("socks-user", "", "socks5 username")
+	var socksPass = flag.String("socks-pass", "", "socks5 password")
+	var serverAddr = flag.String("connect", "", "the target (domain:port)")
 
 	flag.Parse()
 
@@ -42,11 +46,38 @@ func main() {
 	if *serverAddr == "" {
 		logrus.Fatal("please, specify the target host user -connect host:port")
 	}
-	if _, _, err := net.SplitHostPort(*serverAddr); err != nil {
-		logrus.Fatal("invalid connect address, please using host:port")
+	host, _, err := net.SplitHostPort(*serverAddr)
+	if err != nil {
+		logrus.Fatal("invalid connect address, please use host:port")
+	}
+	tlsConfig.ServerName = host
+
+	var conn net.Conn
+
+	if *socksProxy != "" {
+		if _, _, err := net.SplitHostPort(*socksProxy); err != nil {
+			logrus.Fatal("invalid socks5 address, please use host:port")
+		}
+
+		proxyDialer, err := goproxy.SOCKS5("tcp", *socksProxy, &goproxy.Auth{
+			User:     *socksUser,
+			Password: *socksPass,
+		}, goproxy.Direct)
+		if err != nil {
+			logrus.Fatalf("socks5 error: %v", err)
+		}
+		conn, err = proxyDialer.Dial("tcp", *serverAddr)
+		if err != nil {
+			logrus.Fatalf("socks5 dial error: %v", err)
+		}
+	} else {
+		var err error
+		conn, err = net.Dial("tcp", *serverAddr)
+		if err != nil {
+			logrus.Fatalf("dial error: %v", err)
+		}
 	}
 
-	var tlsConfig tls.Config
 	if *ignoreCertificate {
 		logrus.Warn("warning, certificate validation disabled")
 		tlsConfig.InsecureSkipVerify = true
@@ -55,9 +86,8 @@ func main() {
 	listenerConntrack = make(map[int32]net.Conn)
 	listenerMap = make(map[int32]net.Listener)
 
-
 	for {
-		err := connect(*serverAddr, &tlsConfig)
+		err := connect(conn, &tlsConfig)
 		logrus.Errorf("Connection error: %v", err)
 		if *retry {
 			logrus.Info("Retrying in 5 seconds.")
@@ -68,19 +98,15 @@ func main() {
 	}
 }
 
-func connect(addr string, config *tls.Config) error {
+func connect(conn net.Conn, config *tls.Config) error {
+	tlsConn := tls.Client(conn, config)
 
-	dialer, err := tls.Dial("tcp", addr, config)
+	yamuxConn, err := yamux.Server(tlsConn, yamux.DefaultConfig())
 	if err != nil {
 		return err
 	}
 
-	yamuxConn, err := yamux.Server(dialer, yamux.DefaultConfig())
-	if err != nil {
-		return err
-	}
-
-	logrus.WithFields(logrus.Fields{"addr": dialer.RemoteAddr()}).Info("Connection established")
+	logrus.WithFields(logrus.Fields{"addr": tlsConn.RemoteAddr()}).Info("Connection established")
 
 	for {
 		conn, err := yamuxConn.Accept()

