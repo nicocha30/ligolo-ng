@@ -51,43 +51,29 @@ func main() {
 		logrus.Fatal("invalid connect address, please use host:port")
 	}
 	tlsConfig.ServerName = host
-
-	var conn net.Conn
-
-	if *socksProxy != "" {
-		if _, _, err := net.SplitHostPort(*socksProxy); err != nil {
-			logrus.Fatal("invalid socks5 address, please use host:port")
-		}
-
-		proxyDialer, err := goproxy.SOCKS5("tcp", *socksProxy, &goproxy.Auth{
-			User:     *socksUser,
-			Password: *socksPass,
-		}, goproxy.Direct)
-		if err != nil {
-			logrus.Fatalf("socks5 error: %v", err)
-		}
-		conn, err = proxyDialer.Dial("tcp", *serverAddr)
-		if err != nil {
-			logrus.Fatalf("socks5 dial error: %v", err)
-		}
-	} else {
-		var err error
-		conn, err = net.Dial("tcp", *serverAddr)
-		if err != nil {
-			logrus.Fatalf("dial error: %v", err)
-		}
-	}
-
 	if *ignoreCertificate {
 		logrus.Warn("warning, certificate validation disabled")
 		tlsConfig.InsecureSkipVerify = true
 	}
 
+	var conn net.Conn
+
 	listenerConntrack = make(map[int32]net.Conn)
 	listenerMap = make(map[int32]net.Listener)
 
 	for {
-		err := connect(conn, &tlsConfig)
+		var err error
+		if *socksProxy != "" {
+			if _, _, err := net.SplitHostPort(*socksProxy); err != nil {
+				logrus.Fatal("invalid socks5 address, please use host:port")
+			}
+			conn, err = sockDial(*serverAddr, *socksProxy, *socksUser, *socksPass)
+		} else {
+			conn, err = net.Dial("tcp", *serverAddr)
+		}
+		if err == nil {
+			err = connect(conn, &tlsConfig)
+		}
 		logrus.Errorf("Connection error: %v", err)
 		if *retry {
 			logrus.Info("Retrying in 5 seconds.")
@@ -96,6 +82,17 @@ func main() {
 			logrus.Fatal(err)
 		}
 	}
+}
+
+func sockDial(serverAddr string, socksProxy string, socksUser string, socksPass string) (net.Conn, error) {
+	proxyDialer, err := goproxy.SOCKS5("tcp", socksProxy, &goproxy.Auth{
+		User:     socksUser,
+		Password: socksPass,
+	}, goproxy.Direct)
+	if err != nil {
+		logrus.Fatalf("socks5 error: %v", err)
+	}
+	return proxyDialer.Dial("tcp", serverAddr)
 }
 
 func connect(conn net.Conn, config *tls.Config) error {
