@@ -13,7 +13,7 @@ require (
 	golang.org/x/net v0.0.0-20211111083644-e5c967477495
 	golang.zx2c4.com/wintun v0.0.0-20211104114900-415007cec224 // indirect
 	golang.zx2c4.com/wireguard v0.0.0-20211123210315-387f7c461a16
-	gvisor.dev/gvisor v0.0.0-20210923032606-0801d469950e
+	gvisor.dev/gvisor v0.0.0-20210713054152-3ea4ea9e2d5f
 )
 
 require (

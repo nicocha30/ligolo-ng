@@ -18,6 +18,6 @@ func init() {
 		a.Println(" / /___/ / /_/ / /_/ / / /_/ /_____/ / / / /_/ / ")
 		a.Println("/_____/_/\\__, /\\____/_/\\____/     /_/ /_/\\__, /  ")
 		a.Println("        /____/                          /____/   \n")
-		a.Println("Made in France ♥ by Cha! - TNP IT Security <tnpitsecurity.com>\n")
+		a.Println("Made in France ♥ by @Nicocha30!\n")
 	})
 }

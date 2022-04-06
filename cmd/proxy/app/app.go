@@ -30,7 +30,7 @@ var (
 )
 
 const (
-	MaxConnectionHandler = 1024
+	MaxConnectionHandler = 4096
 )
 
 func RegisterAgent(agent proxy.LigoloAgent) error {
