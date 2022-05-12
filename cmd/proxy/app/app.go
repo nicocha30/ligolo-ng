@@ -40,7 +40,7 @@ func RegisterAgent(agent proxy.LigoloAgent) error {
 	return nil
 }
 
-func Run(tuniface string) {
+func Run(stackSettings netstack.StackSettings) {
 	// CurrentAgent points to the selected agent in the UI (when running session)
 	var CurrentAgent proxy.LigoloAgent
 	// ListeningAgent points to the currently running agent (forwarding packets)
@@ -52,7 +52,7 @@ func Run(tuniface string) {
 
 	// Create a new stack, but without connPool.
 	// The connPool will be created when using the *start* command
-	nstack := netstack.NewStack(tuniface, nil)
+	nstack := netstack.NewStack(stackSettings, nil)
 
 	App.AddCommand(&grumble.Command{
 		Name:  "session",

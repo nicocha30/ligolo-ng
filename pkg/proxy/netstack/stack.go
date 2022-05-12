@@ -81,10 +81,15 @@ type NetStack struct {
 	sync.Mutex
 }
 
+type StackSettings struct {
+	TunName     string
+	MaxInflight int
+}
+
 // NewStack registers a new GVisor Network Stack
-func NewStack(tunName string, connPool *ConnPool) *NetStack {
+func NewStack(settings StackSettings, connPool *ConnPool) *NetStack {
 	ns := NetStack{pool: connPool}
-	ns.new(tunName)
+	ns.new(settings)
 	return &ns
 }
 
@@ -101,7 +106,7 @@ func (s *NetStack) SetConnPool(connPool *ConnPool) {
 }
 
 // New creates a new userland network stack (using Gvisor) that listen on a tun interface.
-func (s *NetStack) new(tunName string) *stack.Stack {
+func (s *NetStack) new(stackSettings StackSettings) *stack.Stack {
 
 	// Create a new gvisor userland network stack.
 	ns := stack.New(stack.Options{
@@ -171,7 +176,7 @@ func (s *NetStack) new(tunName string) *stack.Stack {
 	ns.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpHandler.HandlePacket)
 	ns.SetTransportProtocolHandler(udp.ProtocolNumber, udpHandler.HandlePacket)
 
-	linkEP, err := tun.Open(tunName)
+	linkEP, err := tun.Open(stackSettings.TunName)
 	if err != nil {
 		panic(fmt.Errorf("tun.Open: %v", err))
 	}
