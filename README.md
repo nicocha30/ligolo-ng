@@ -28,7 +28,7 @@ An advanced, yet simple, tunneling tool that uses a TUN interface.
     - [Using Let's Encrypt Autocert](#using-lets-encrypt-autocert)
     - [Using your own TLS certificates](#using-your-own-tls-certificates)
     - [Automatic self-signed certificates (NOT RECOMMENDED)](#automatic-self-signed-certificates-not-recommended)
-  - [Using Ligolo-ng](using-ligolo-ng)
+  - [Using Ligolo-ng](#using-ligolo-ng)
   - [Agent Binding/Listening](#agent-bindinglistening)
 - [Demo](#demo)
 - [Does it require Administrator/root access ?](#does-it-require-administratorroot-access-)
