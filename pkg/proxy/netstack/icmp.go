@@ -3,15 +3,15 @@ package netstack
 import (
 	"bytes"
 	"errors"
+	"github.com/nicocha30/gvisor-ligolo/pkg/buffer"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/network/ipv4"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/stack"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/icmp"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/raw"
+	"github.com/nicocha30/gvisor-ligolo/pkg/waiter"
 	"github.com/sirupsen/logrus"
-	"gvisor.dev/gvisor/pkg/tcpip"
-	"gvisor.dev/gvisor/pkg/tcpip/buffer"
-	"gvisor.dev/gvisor/pkg/tcpip/header"
-	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/raw"
-	"gvisor.dev/gvisor/pkg/waiter"
 )
 
 // icmpResponder handle ICMP packets coming to gvisor/netstack.
@@ -29,8 +29,8 @@ func icmpResponder(s *NetStack) error {
 		return errors.New("could not bind raw endpoint")
 	}
 	go func() {
-		we, ch := waiter.NewChannelEntry(nil)
-		wq.EventRegister(&we, waiter.ReadableEvents)
+		we, ch := waiter.NewChannelEntry(waiter.ReadableEvents)
+		wq.EventRegister(&we)
 		for {
 			var buff bytes.Buffer
 			_, err := rawProto.Read(&buff, tcpip.ReadOptions{})
@@ -59,9 +59,9 @@ func icmpResponder(s *NetStack) error {
 					}
 
 					// Reconstruct a ICMP PacketBuffer from bytes.
-					view := buffer.NewViewFromBytes(buff.Bytes())
+					view := buffer.NewWithData(buff.Bytes())
 					packetbuff := stack.NewPacketBuffer(stack.PacketBufferOptions{
-						Data:               view.ToVectorisedView(),
+						Payload:            view,
 						ReserveHeaderBytes: hlen,
 					})
 
@@ -155,12 +155,13 @@ func ProcessICMP(nstack *stack.Stack, pkt *stack.PacketBuffer) {
 		replyICMPHdr.SetChecksum(0)
 		replyICMPHdr.SetChecksum(^header.Checksum(replyData, 0))
 
-		replyVV := buffer.View(replyIPHdr).ToVectorisedView()
-		replyVV.AppendView(replyData)
+		replyBuf := buffer.NewWithData(replyIPHdr)
+		replyBuf.AppendOwned(replyData)
 		replyPkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 			ReserveHeaderBytes: int(r.MaxHeaderLength()),
-			Data:               replyVV,
+			Payload:            replyBuf,
 		})
+
 		replyPkt.TransportProtocolNumber = header.ICMPv4ProtocolNumber
 
 		if err := r.WriteHeaderIncludedPacket(replyPkt); err != nil {

@@ -4,8 +4,8 @@
 package tun
 
 import (
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/stack"
 	"golang.zx2c4.com/wireguard/tun"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
 func Open(tunName string) (stack.LinkEndpoint, error) {

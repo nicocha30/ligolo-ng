@@ -4,10 +4,10 @@ import (
 	"flag"
 	"github.com/desertbit/grumble"
 	"github.com/hashicorp/yamux"
+	"github.com/nicocha30/ligolo-ng/cmd/proxy/app"
+	"github.com/nicocha30/ligolo-ng/pkg/proxy"
+	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack"
 	"github.com/sirupsen/logrus"
-	"ligolo-ng/cmd/proxy/app"
-	"ligolo-ng/pkg/proxy"
-	"ligolo-ng/pkg/proxy/netstack"
 	"os"
 	"strings"
 )

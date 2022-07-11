@@ -4,11 +4,11 @@
 package tun
 
 import (
+	"github.com/nicocha30/gvisor-ligolo/pkg/buffer"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/stack"
 	wgtun "golang.zx2c4.com/wireguard/tun"
-	"gvisor.dev/gvisor/pkg/tcpip"
-	"gvisor.dev/gvisor/pkg/tcpip/buffer"
-	"gvisor.dev/gvisor/pkg/tcpip/header"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
 type RWEndpoint struct {
@@ -64,14 +64,14 @@ func (m *RWEndpoint) dispatchLoop() {
 		}
 
 		pkb := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			Data: buffer.NewVectorisedView(n, []buffer.View{buffer.NewViewFromBytes(packet)}),
+			Payload: buffer.NewWithData(packet[:n]),
 		})
 
 		switch header.IPVersion(packet) {
 		case header.IPv4Version:
-			m.dispatcher.DeliverNetworkPacket("", "", header.IPv4ProtocolNumber, pkb)
+			m.dispatcher.DeliverNetworkPacket(header.IPv4ProtocolNumber, pkb)
 		case header.IPv6Version:
-			m.dispatcher.DeliverNetworkPacket("", "", header.IPv6ProtocolNumber, pkb)
+			m.dispatcher.DeliverNetworkPacket(header.IPv6ProtocolNumber, pkb)
 		}
 	}
 }
@@ -82,10 +82,10 @@ func (m *RWEndpoint) IsAttached() bool {
 }
 
 // WritePackets writes outbound packets
-func (m *RWEndpoint) WritePackets(r stack.RouteInfo, pkts stack.PacketBufferList, protocol tcpip.NetworkProtocolNumber) (int, tcpip.Error) {
+func (m *RWEndpoint) WritePackets(pkts stack.PacketBufferList) (int, tcpip.Error) {
 	n := 0
-	for pkt := pkts.Front(); pkt != nil; pkt = pkt.Next() {
-		if err := m.WritePacket(r, protocol, pkt); err != nil {
+	for _, pkt := range pkts.AsSlice() {
+		if err := m.WritePacket(pkt); err != nil {
 			break
 		}
 		n++
@@ -94,10 +94,12 @@ func (m *RWEndpoint) WritePackets(r stack.RouteInfo, pkts stack.PacketBufferList
 }
 
 // WritePacket writes outbound packets
-func (m *RWEndpoint) WritePacket(r stack.RouteInfo, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) tcpip.Error {
-	vv := buffer.NewVectorisedView(pkt.Size(), pkt.Views())
+func (m *RWEndpoint) WritePacket(pkt *stack.PacketBuffer) tcpip.Error {
+	var buf buffer.Buffer
+	pktBuf := pkt.Buffer()
+	buf.Merge(&pktBuf)
 
-	if _, err := m.wgdev.Write(vv.ToView(), 0); err != nil {
+	if _, err := m.wgdev.Write(buf.Flatten(), 0); err != nil {
 		return &tcpip.ErrInvalidEndpointState{}
 	}
 	return nil
@@ -112,7 +114,7 @@ func (*RWEndpoint) ARPHardwareType() header.ARPHardwareType {
 }
 
 // AddHeader implements stack.LinkEndpoint.AddHeader.
-func (*RWEndpoint) AddHeader(local, remote tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) {
+func (*RWEndpoint) AddHeader(pkt *stack.PacketBuffer) {
 }
 
 // WriteRawPacket implements stack.LinkEndpoint.

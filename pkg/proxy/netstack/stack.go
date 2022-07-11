@@ -2,16 +2,16 @@ package netstack
 
 import (
 	"fmt"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/network/ipv4"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/network/ipv6"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/stack"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/icmp"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/tcp"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/udp"
+	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack/tun"
 	"github.com/sirupsen/logrus"
-	"gvisor.dev/gvisor/pkg/tcpip"
-	"gvisor.dev/gvisor/pkg/tcpip/header"
-	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
-	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
-	"ligolo-ng/pkg/proxy/netstack/tun"
 	"sync"
 )
 
@@ -178,7 +178,7 @@ func (s *NetStack) new(stackSettings StackSettings) *stack.Stack {
 
 	linkEP, err := tun.Open(stackSettings.TunName)
 	if err != nil {
-		panic(fmt.Errorf("tun.Open: %v", err))
+		logrus.Fatalf("unable to create tun interface: (tun.Open %v), make sure you created the tun interface", err)
 	}
 	// Create a new NIC
 	if err := ns.CreateNIC(1, linkEP); err != nil {
