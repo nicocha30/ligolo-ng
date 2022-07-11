@@ -130,7 +130,7 @@ func (s *NetStack) new(stackSettings StackSettings) *stack.Stack {
 	ns.SetICMPBurst(0)
 
 	// Forward TCP connections
-	tcpHandler := tcp.NewForwarder(ns, 0, 4096, func(request *tcp.ForwarderRequest) {
+	tcpHandler := tcp.NewForwarder(ns, 0, stackSettings.MaxInflight, func(request *tcp.ForwarderRequest) {
 		tcpConn := TCPConn{
 			EndpointID: request.ID(),
 			Request:    request,
