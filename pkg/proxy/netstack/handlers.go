@@ -2,9 +2,6 @@ package netstack
 
 import (
 	"github.com/hashicorp/yamux"
-	"github.com/nicocha30/ligolo-ng/pkg/protocol"
-	"github.com/nicocha30/ligolo-ng/pkg/relay"
-	"github.com/sirupsen/logrus"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/adapters/gonet"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/stack"
@@ -12,6 +9,9 @@ import (
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/tcp"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/udp"
 	"github.com/nicocha30/gvisor-ligolo/pkg/waiter"
+	"github.com/nicocha30/ligolo-ng/pkg/protocol"
+	"github.com/nicocha30/ligolo-ng/pkg/relay"
+	"github.com/sirupsen/logrus"
 	"io"
 )
 
@@ -25,7 +25,7 @@ func handleICMP(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Session
 	}
 	h := header.ICMPv4(v)
 	if h.Type() == header.ICMPv4Echo {
-		iph := header.IPv4(pkt.NetworkHeader().View())
+		iph := header.IPv4(pkt.NetworkHeader().Slice())
 		yamuxConnectionSession, err := yamuxConn.Open()
 		if err != nil {
 			logrus.Error(err)

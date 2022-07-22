@@ -3,7 +3,7 @@ package netstack
 import (
 	"bytes"
 	"errors"
-	"github.com/nicocha30/gvisor-ligolo/pkg/buffer"
+	"github.com/nicocha30/gvisor-ligolo/pkg/bufferv2"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/network/ipv4"
@@ -59,7 +59,8 @@ func icmpResponder(s *NetStack) error {
 					}
 
 					// Reconstruct a ICMP PacketBuffer from bytes.
-					view := buffer.NewWithData(buff.Bytes())
+
+					view := bufferv2.MakeWithData(buff.Bytes())
 					packetbuff := stack.NewPacketBuffer(stack.PacketBufferOptions{
 						Payload:            view,
 						ReserveHeaderBytes: hlen,
@@ -111,15 +112,16 @@ func ProcessICMP(nstack *stack.Stack, pkt *stack.PacketBuffer) {
 		return
 	}
 
-	iph := header.IPv4(pkt.NetworkHeader().View())
+	iph := header.IPv4(pkt.NetworkHeader().Slice())
 	var newOptions header.IPv4Options
 
 	// TODO(b/112892170): Meaningfully handle all ICMP types.
 	switch h.Type() {
 	case header.ICMPv4Echo:
 
-		replyData := pkt.Data().AsRange().ToOwnedView()
-		ipHdr := header.IPv4(pkt.NetworkHeader().View())
+		replyData := stack.PayloadSince(pkt.TransportHeader())
+		defer replyData.Release()
+		ipHdr := header.IPv4(pkt.NetworkHeader().Slice())
 
 		localAddressBroadcast := pkt.NetworkPacketInfo.LocalAddressBroadcast
 
@@ -128,7 +130,10 @@ func ProcessICMP(nstack *stack.Stack, pkt *stack.PacketBuffer) {
 
 		// Take the base of the incoming request IP header but replace the options.
 		replyHeaderLength := uint8(header.IPv4MinimumSize + len(newOptions))
-		replyIPHdr := header.IPv4(append(iph[:header.IPv4MinimumSize:header.IPv4MinimumSize], newOptions...))
+		replyIPHdrView := bufferv2.NewView(int(replyHeaderLength))
+		replyIPHdrView.Write(iph[:header.IPv4MinimumSize])
+		replyIPHdrView.Write(newOptions)
+		replyIPHdr := header.IPv4(replyIPHdrView.AsSlice())
 		replyIPHdr.SetHeaderLength(replyHeaderLength)
 
 		// As per RFC 1122 section 3.2.1.3, when a host sends any datagram, the IP
@@ -150,13 +155,13 @@ func ProcessICMP(nstack *stack.Stack, pkt *stack.PacketBuffer) {
 		replyIPHdr.SetDestinationAddress(r.RemoteAddress())
 		replyIPHdr.SetTTL(r.DefaultTTL())
 
-		replyICMPHdr := header.ICMPv4(replyData)
+		replyICMPHdr := header.ICMPv4(replyData.AsSlice())
 		replyICMPHdr.SetType(header.ICMPv4EchoReply)
 		replyICMPHdr.SetChecksum(0)
-		replyICMPHdr.SetChecksum(^header.Checksum(replyData, 0))
+		replyICMPHdr.SetChecksum(^header.Checksum(replyData.AsSlice(), 0))
 
-		replyBuf := buffer.NewWithData(replyIPHdr)
-		replyBuf.AppendOwned(replyData)
+		replyBuf := bufferv2.MakeWithView(replyIPHdrView)
+		replyBuf.Append(replyData.Clone())
 		replyPkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 			ReserveHeaderBytes: int(r.MaxHeaderLength()),
 			Payload:            replyBuf,
