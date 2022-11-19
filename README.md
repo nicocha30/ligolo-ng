@@ -4,7 +4,7 @@
 
 An advanced, yet simple, tunneling tool that uses a TUN interface.
 
-[by TNP IT Security](https://tnpitsecurity.com/)
+[by TNP IT Security](https://tnpitsecurity.com/) feat MIS-team
 
 [![GPLv3](https://img.shields.io/badge/License-GPLv3-brightgreen.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Go Report](https://goreportcard.com/badge/github.com/tnpitsecurity/ligolo-ng)](https://goreportcard.com/report/github.com/tnpitsecurity/ligolo-ng)
@@ -54,6 +54,8 @@ tunnels from a reverse TCP/TLS connection using a **tun interface** (without the
 - Does not require high privileges
 - Socket listening/binding on the *agent*
 - Multiple platforms supported for the *agent*
+- Websocket Support (use your favorite CDN as proxy)
+- Domain fronting via TLS 1.3 ECH (Encrypted Client Hello)
 
 ## How is this different from Ligolo/Chisel/Meterpreter... ?
 
@@ -73,19 +75,22 @@ This allows running tools like *nmap* without the use of *proxychains* (simpler 
 
 ## Building & Usage
 
-### Precompiled binaries
-
-Precompiled binaries (Windows/Linux/macOS) are available on the [Release page](https://github.com/tnpitsecurity/ligolo-ng/releases).
-
 ### Building Ligolo-ng
-Building *ligolo-ng* (Go >= 1.17 is required):
+Building *ligolo-ng* (Go >= 1.18 with ECH support is required [Cloudflare Go](https://github.com/cloudflare/go) ): 
+
+Install CF GO:
+```shell
+git clone https://github.com/cloudflare/go ~/go-cf
+cd ~/go-cf/src/
+./make.bash
+````
 
 ```shell
-$ go build -o agent cmd/agent/main.go
-$ go build -o proxy cmd/proxy/main.go
+$ GOROOT=~/go-cf/  ~/go-cf/go build -o agent cmd/agent/main.go
+$ GOROOT=~/go-cf/  ~/go-cf/go build -o proxy cmd/proxy/main.go
 # Build for Windows
-$ GOOS=windows go build -o agent.exe cmd/agent/main.go
-$ GOOS=windows go build -o proxy.exe cmd/proxy/main.go
+$ GOOS=windows GOROOT=~/go-cf/  ~/go-cf/go build -o agent.exe cmd/agent/main.go
+$ GOOS=windows GOROOT=~/go-cf/  ~/go-cf/go build -o proxy.exe cmd/proxy/main.go
 ```
 
 ### Setup Ligolo-ng
@@ -204,7 +209,26 @@ $ nmap 192.168.0.0/24 -v -sV -n
 $ rdesktop 192.168.0.123
 [...]
 ```
+### Using Websockets and CDN domain fronting
+Start proxy with websocket listening (if use https:// prefix proxy will use websocket protocol):
+```shell
+./proxy -selcert -laddr https://0.0.0.0:443  
+```
+Make your favorite CDN - Cloudflare, Amazon Cloudfront, Akamai, etc. P.S Azure DOES NOT WORKS with w
+ebsocket :((
 
+Start agent with ECH support:
+```shell
+./agent -ech -connect https://your.domain.via.cdn.com:443 
+```
+
+Look at Wireshark - there will be no your.domain.via.cdn.com in SNI
+> You can set ANY FrontDomain in ~/go-cf/src/crypto/tls/ech.go
+> 
+> ex: 
+> hello.serverName = hostnameInSNI(string(echConfig.rawPublicName)) -> hello.serverName = "microsoft.com"
+> 
+> and it will be hardcoded in TLS SNI !!!
 ### Agent Binding/Listening
 
 You can listen to ports on the *agent* and *redirect* connections to your control/proxy server.

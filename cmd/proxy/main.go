@@ -10,6 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"os"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -77,6 +78,21 @@ func main() {
 			if err := app.RegisterAgent(agent); err != nil {
 				logrus.Errorf("could not register agent: %s", err.Error())
 			}
+		}
+	}()
+
+	//agent check-in routine
+	go func() {
+		for {
+			for num, agent := range app.AgentList {
+				if agent.Session.IsClosed() {
+					logrus.Infof("Agent %v: is offline. Deleting session %v", num, agent.Name)
+					app.AgentListMutex.Lock()
+					delete(app.AgentList, agent.Id)
+					app.AgentListMutex.Unlock()
+				}
+			}
+			time.Sleep(time.Second * 1)
 		}
 	}()
 

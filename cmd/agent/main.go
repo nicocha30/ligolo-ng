@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,7 +14,15 @@ import (
 	"github.com/nicocha30/ligolo-ng/pkg/relay"
 	"github.com/sirupsen/logrus"
 	goproxy "golang.org/x/net/proxy"
+	"net/http"
+	"regexp"
+	"strings"
+
 	"net"
+
+	"github.com/likexian/doh-go"
+	"github.com/likexian/doh-go/dns"
+	"nhooyr.io/websocket"
 	"os"
 	"os/user"
 	"syscall"
@@ -29,6 +38,7 @@ func main() {
 	var tlsConfig tls.Config
 	var ignoreCertificate = flag.Bool("ignore-cert", false, "ignore TLS certificate validation (dangerous), only for debug purposes")
 	var verbose = flag.Bool("v", false, "enable verbose mode")
+	var ech = flag.Bool("ech", false, "enable TLS1.3 Enrypted Client Hello (TLS domain fronting)")
 	var retry = flag.Bool("retry", false, "auto-retry on error")
 	var socksProxy = flag.String("socks", "", "socks5 proxy address (ip:port)")
 	var socksUser = flag.String("socks-user", "", "socks5 username")
@@ -46,14 +56,29 @@ func main() {
 	if *serverAddr == "" {
 		logrus.Fatal("please, specify the target host user -connect host:port")
 	}
-	host, _, err := net.SplitHostPort(*serverAddr)
-	if err != nil {
-		logrus.Fatal("invalid connect address, please use host:port")
-	}
-	tlsConfig.ServerName = host
-	if *ignoreCertificate {
-		logrus.Warn("warning, certificate validation disabled")
-		tlsConfig.InsecureSkipVerify = true
+
+	if strings.Contains(*serverAddr, "https://") {
+		//websocket connection
+		host, _, err := net.SplitHostPort(strings.Replace(*serverAddr, "https://", "", 1))
+		if err != nil {
+			logrus.Fatal("invalid https address, please use https://host:port")
+		}
+		tlsConfig.ServerName = host
+		if *ignoreCertificate {
+			logrus.Warn("warning, certificate validation disabled")
+			tlsConfig.InsecureSkipVerify = true
+		}
+	} else {
+		//direct connection
+		host, _, err := net.SplitHostPort(*serverAddr)
+		if err != nil {
+			logrus.Fatal("invalid connect address, please use host:port")
+		}
+		tlsConfig.ServerName = host
+		if *ignoreCertificate {
+			logrus.Warn("warning, certificate validation disabled")
+			tlsConfig.InsecureSkipVerify = true
+		}
 	}
 
 	var conn net.Conn
@@ -63,17 +88,25 @@ func main() {
 
 	for {
 		var err error
-		if *socksProxy != "" {
-			if _, _, err := net.SplitHostPort(*socksProxy); err != nil {
-				logrus.Fatal("invalid socks5 address, please use host:port")
-			}
-			conn, err = sockDial(*serverAddr, *socksProxy, *socksUser, *socksPass)
+		if strings.Contains(*serverAddr, "https://") {
+			*serverAddr = strings.Replace(*serverAddr, "https://", "wss://", 1)
+			//websocket
+			err = wsconnect(&tlsConfig, *serverAddr, *ech)
 		} else {
-			conn, err = net.Dial("tcp", *serverAddr)
+			//direct connection
+			if *socksProxy != "" {
+				if _, _, err := net.SplitHostPort(*socksProxy); err != nil {
+					logrus.Fatal("invalid socks5 address, please use host:port")
+				}
+				conn, err = sockDial(*serverAddr, *socksProxy, *socksUser, *socksPass)
+			} else {
+				conn, err = net.Dial("tcp", *serverAddr)
+			}
+			if err == nil {
+				err = connect(conn, &tlsConfig)
+			}
 		}
-		if err == nil {
-			err = connect(conn, &tlsConfig)
-		}
+
 		logrus.Errorf("Connection error: %v", err)
 		if *retry {
 			logrus.Info("Retrying in 5 seconds.")
@@ -93,6 +126,88 @@ func sockDial(serverAddr string, socksProxy string, socksUser string, socksPass 
 		logrus.Fatalf("socks5 error: %v", err)
 	}
 	return proxyDialer.Dial("tcp", serverAddr)
+}
+
+func DoHGetECHKeys(servername string) []tls.ECHConfig {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	c := doh.Use(doh.GoogleProvider)
+
+	// do doh query
+	rsp, err := c.Query(ctx, dns.Domain(servername), dns.Type("TYPE65"))
+	if err != nil {
+		return nil
+	}
+	c.Close()
+
+	//regex for Google DoH provider
+	//if we use CloudFlare DoH provider regex will be other !!
+	r, _ := regexp.Compile("ech=.*? ")
+	ech := r.FindString(rsp.Answer[0].Data)
+
+	echbin, err := base64.StdEncoding.DecodeString(strings.TrimSpace(ech[4:]))
+	if err != nil {
+		return nil
+	}
+	echConfigsList, err := tls.UnmarshalECHConfigs(echbin)
+	if err != nil {
+		return nil
+	}
+	return echConfigsList
+}
+
+func wsconnect(config *tls.Config, wsaddr string, useECH bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+	defer cancel()
+
+	if useECH {
+		echConfigsList := DoHGetECHKeys("crypto.cloudflare.com")
+		if echConfigsList != nil {
+			logrus.Info("Got ECH keys. Using TLS1.3 ECH...")
+			config.ECHEnabled = true
+			config.ClientECHConfigs = echConfigsList
+			config.MinVersion = tls.VersionTLS12
+		} else {
+			logrus.Info("Error with ECH keys. Using plaintext SNI :( ...")
+			config.ECHEnabled = false
+			config.MinVersion = tls.VersionTLS11
+		}
+	}
+
+	httpTransport := &http.Transport{
+		MaxIdleConns:    http.DefaultMaxIdleConnsPerHost,
+		TLSClientConfig: config,
+	}
+	httpClient := &http.Client{Transport: httpTransport}
+
+	httpheader := &http.Header{}
+	httpheader.Add("X-Agent", "Ligolo-NG")
+
+	wsConn, _, err := websocket.Dial(ctx, wsaddr, &websocket.DialOptions{HTTPClient: httpClient, HTTPHeader: *httpheader})
+	if err != nil {
+		return err
+	}
+
+	netctx, _ := context.WithTimeout(context.Background(), time.Hour*999999)
+	netConn := websocket.NetConn(netctx, wsConn, websocket.MessageBinary)
+	yamuxConn, err := yamux.Server(netConn, yamux.DefaultConfig())
+	if err != nil {
+		return err
+	}
+
+	logrus.WithFields(logrus.Fields{"addr": netConn.RemoteAddr()}).Info("websocket connection established")
+
+	for {
+
+		conn, err := yamuxConn.Accept()
+		if err != nil {
+			return err
+		}
+		go handleConn(conn)
+	}
+
+	return nil
 }
 
 func connect(conn net.Conn, config *tls.Config) error {
