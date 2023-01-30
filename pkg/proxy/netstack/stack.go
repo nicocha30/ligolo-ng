@@ -2,6 +2,9 @@ package netstack
 
 import (
 	"fmt"
+	"sync"
+	"unsafe"
+
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/network/ipv4"
@@ -12,7 +15,6 @@ import (
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/udp"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack/tun"
 	"github.com/sirupsen/logrus"
-	"sync"
 )
 
 type TunConn struct {
@@ -105,6 +107,23 @@ func (s *NetStack) SetConnPool(connPool *ConnPool) {
 	s.Unlock()
 }
 
+// Hack to increment the UDP packet buffer refcount and prevent panic
+// when the response is received.
+func udpFix(request *udp.ForwarderRequest) {
+	ptr_struct := unsafe.Pointer(request)
+	request_struct_size := unsafe.Sizeof(*request)
+	// Determine the word size
+	const is64Bit = uint64(^uintptr(0)) == ^uint64(0)
+	if is64Bit {
+		request_struct_size = request_struct_size - 8
+	} else {
+		request_struct_size = request_struct_size - 4
+	}
+	ptr_struct = unsafe.Pointer(uintptr(ptr_struct) + request_struct_size)
+	ptrTobuf := (*stack.PacketBuffer)(ptr_struct)
+	ptrTobuf.IncRef()
+}
+
 // New creates a new userland network stack (using Gvisor) that listen on a tun interface.
 func (s *NetStack) new(stackSettings StackSettings) *stack.Stack {
 
@@ -163,6 +182,8 @@ func (s *NetStack) new(stackSettings StackSettings) *stack.Stack {
 		if s.pool == nil || s.pool.Closed() {
 			return // If connPool is closed, ignore packet.
 		}
+
+		udpFix(request)
 
 		if err := s.pool.Add(TunConn{
 			udp.ProtocolNumber,
