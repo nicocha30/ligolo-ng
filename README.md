@@ -4,10 +4,8 @@
 
 An advanced, yet simple, tunneling tool that uses a TUN interface.
 
-[by TNP IT Security](https://tnpitsecurity.com/)
-
 [![GPLv3](https://img.shields.io/badge/License-GPLv3-brightgreen.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Go Report](https://goreportcard.com/badge/github.com/tnpitsecurity/ligolo-ng)](https://goreportcard.com/report/github.com/tnpitsecurity/ligolo-ng)
+[![Go Report](https://goreportcard.com/badge/github.com/nicocha30/ligolo-ng)](https://goreportcard.com/report/github.com/nicocha30/ligolo-ng)
 
 ## Table of Contents
 
@@ -75,7 +73,7 @@ This allows running tools like *nmap* without the use of *proxychains* (simpler 
 
 ### Precompiled binaries
 
-Precompiled binaries (Windows/Linux/macOS) are available on the [Release page](https://github.com/tnpitsecurity/ligolo-ng/releases).
+Precompiled binaries (Windows/Linux/macOS) are available on the [Release page](https://github.com/nicocha30/ligolo-ng/releases).
 
 ### Building Ligolo-ng
 Building *ligolo-ng* (Go >= 1.17 is required):
@@ -301,6 +299,4 @@ When using *nmap*, you should use `--unprivileged` or `-PE` to avoid false posit
 
 ## Credits
 
-- Nicolas Chatelain <nicolas.chatelain -at- tnpconsultants.com>
-
-[![tnpitsecurity.com](doc/tnplogo.png)](https://tnpitsecurity.com/)
+- Nicolas Chatelain <nicolas -at- chatelain.me>

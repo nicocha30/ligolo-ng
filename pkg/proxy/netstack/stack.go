@@ -71,7 +71,7 @@ type UDPConn struct {
 
 // ICMPConn represents a ICMP Packet Buffer
 type ICMPConn struct {
-	Request *stack.PacketBuffer
+	Request stack.PacketBufferPtr
 }
 
 // NetStack is the structure used to store the connection pool and the gvisor network stack

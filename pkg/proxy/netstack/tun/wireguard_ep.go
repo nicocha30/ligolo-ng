@@ -94,7 +94,7 @@ func (m *RWEndpoint) WritePackets(pkts stack.PacketBufferList) (int, tcpip.Error
 }
 
 // WritePacket writes outbound packets
-func (m *RWEndpoint) WritePacket(pkt *stack.PacketBuffer) tcpip.Error {
+func (m *RWEndpoint) WritePacket(pkt stack.PacketBufferPtr) tcpip.Error {
 	var buf bufferv2.Buffer
 	pktBuf := pkt.ToBuffer()
 	buf.Merge(&pktBuf)
@@ -114,10 +114,10 @@ func (*RWEndpoint) ARPHardwareType() header.ARPHardwareType {
 }
 
 // AddHeader implements stack.LinkEndpoint.AddHeader.
-func (*RWEndpoint) AddHeader(pkt *stack.PacketBuffer) {
+func (*RWEndpoint) AddHeader(pkt stack.PacketBufferPtr) {
 }
 
 // WriteRawPacket implements stack.LinkEndpoint.
-func (*RWEndpoint) WriteRawPacket(*stack.PacketBuffer) tcpip.Error {
+func (*RWEndpoint) WriteRawPacket(stack.PacketBufferPtr) tcpip.Error {
 	return &tcpip.ErrNotSupported{}
 }

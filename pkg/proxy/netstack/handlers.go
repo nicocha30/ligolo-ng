@@ -54,7 +54,9 @@ func handleICMP(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Session
 		response := protocolDecoder.Envelope.Payload
 		reply := response.(protocol.HostPingResponsePacket)
 		if reply.Alive {
+			logrus.Debug("Host is alive, sending reply")
 			ProcessICMP(nstack, pkt)
+
 		}
 
 	}

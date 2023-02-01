@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/nicocha30/gvisor-ligolo/pkg/bufferv2"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/checksum"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/network/ipv4"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/stack"
@@ -96,7 +97,7 @@ func icmpResponder(s *NetStack) error {
 
 // ProcessICMP send back a ICMP echo reply from after receiving a echo request.
 // This code come mostly from pkg/tcpip/network/ipv4/icmp.go
-func ProcessICMP(nstack *stack.Stack, pkt *stack.PacketBuffer) {
+func ProcessICMP(nstack *stack.Stack, pkt stack.PacketBufferPtr) {
 	// (gvisor) pkg/tcpip/network/ipv4/icmp.go:174 - handleICMP
 
 	// ICMP packets don't have their TransportHeader fields set. See
@@ -106,19 +107,19 @@ func ProcessICMP(nstack *stack.Stack, pkt *stack.PacketBuffer) {
 		return
 	}
 	h := header.ICMPv4(v)
-
-	// Only do in-stack processing if the checksum is correct.
-	if pkt.Data().AsRange().Checksum() != 0xffff {
-		return
-	}
-
+	// Ligolo-ng: not sure why, but checksum is invalid here.
+	/*
+		// Only do in-stack processing if the checksum is correct.
+		if checksum.Checksum(h, pkt.Data().Checksum()) != 0xffff {
+			return
+		}
+	*/
 	iph := header.IPv4(pkt.NetworkHeader().Slice())
 	var newOptions header.IPv4Options
 
 	// TODO(b/112892170): Meaningfully handle all ICMP types.
 	switch h.Type() {
 	case header.ICMPv4Echo:
-
 		replyData := stack.PayloadSince(pkt.TransportHeader())
 		defer replyData.Release()
 		ipHdr := header.IPv4(pkt.NetworkHeader().Slice())
@@ -126,7 +127,8 @@ func ProcessICMP(nstack *stack.Stack, pkt *stack.PacketBuffer) {
 		localAddressBroadcast := pkt.NetworkPacketInfo.LocalAddressBroadcast
 
 		// It's possible that a raw socket expects to receive this.
-		pkt = nil
+		pkt = stack.PacketBufferPtr{}
+		_ = pkt // Suppress unused variable warning.
 
 		// Take the base of the incoming request IP header but replace the options.
 		replyHeaderLength := uint8(header.IPv4MinimumSize + len(newOptions))
@@ -158,7 +160,7 @@ func ProcessICMP(nstack *stack.Stack, pkt *stack.PacketBuffer) {
 		replyICMPHdr := header.ICMPv4(replyData.AsSlice())
 		replyICMPHdr.SetType(header.ICMPv4EchoReply)
 		replyICMPHdr.SetChecksum(0)
-		replyICMPHdr.SetChecksum(^header.Checksum(replyData.AsSlice(), 0))
+		replyICMPHdr.SetChecksum(^checksum.Checksum(replyData.AsSlice(), 0))
 
 		replyBuf := bufferv2.MakeWithView(replyIPHdrView)
 		replyBuf.Append(replyData.Clone())
