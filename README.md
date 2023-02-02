@@ -294,7 +294,6 @@ When using *nmap*, you should use `--unprivileged` or `-PE` to avoid false posit
 
 - Implement other ICMP error messages (this will speed up UDP scans) ;
 - Do not *RST* when receiving an *ACK* from an invalid TCP connection (nmap will report the host as up) ;
-- Implement *proxy* support for Darwin ;
 - Add mTLS support.
 
 ## Credits
