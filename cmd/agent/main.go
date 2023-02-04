@@ -14,8 +14,12 @@ import (
 	"github.com/sirupsen/logrus"
 	goproxy "golang.org/x/net/proxy"
 	"net"
+	"net/http"
+	"net/url"
+	"nhooyr.io/websocket"
 	"os"
 	"os/user"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -30,10 +34,14 @@ func main() {
 	var ignoreCertificate = flag.Bool("ignore-cert", false, "ignore TLS certificate validation (dangerous), only for debug purposes")
 	var verbose = flag.Bool("v", false, "enable verbose mode")
 	var retry = flag.Bool("retry", false, "auto-retry on error")
-	var socksProxy = flag.String("socks", "", "socks5 proxy address (ip:port)")
+	var retryTime = flag.Int("retryTime", 5, "auto-retry timeout in sec")
+	var socksProxy = flag.String("proxy", "", "socks5/http proxy address (ip:port) "+
+		"in case of websockets it could be proxy URL: http://admin:secret@127.0.0.1:8080")
 	var socksUser = flag.String("socks-user", "", "socks5 username")
 	var socksPass = flag.String("socks-pass", "", "socks5 password")
 	var serverAddr = flag.String("connect", "", "the target (domain:port)")
+	var userAgent = flag.String("ua", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
+		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36", "http User-Agent")
 
 	flag.Parse()
 
@@ -43,17 +51,28 @@ func main() {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
-	if *serverAddr == "" {
-		logrus.Fatal("please, specify the target host user -connect host:port")
-	}
-	host, _, err := net.SplitHostPort(*serverAddr)
-	if err != nil {
-		logrus.Fatal("invalid connect address, please use host:port")
-	}
-	tlsConfig.ServerName = host
-	if *ignoreCertificate {
-		logrus.Warn("warning, certificate validation disabled")
-		tlsConfig.InsecureSkipVerify = true
+	if strings.Contains(*serverAddr, "https://") {
+		//websocket connection
+		host, _, err := net.SplitHostPort(strings.Replace(*serverAddr, "https://", "", 1))
+		if err != nil {
+			logrus.Fatal("invalid https address, please use https://host:port")
+		}
+		tlsConfig.ServerName = host
+		if *ignoreCertificate {
+			logrus.Warn("warning, certificate validation disabled")
+			tlsConfig.InsecureSkipVerify = true
+		}
+	} else {
+		//direct connection
+		host, _, err := net.SplitHostPort(*serverAddr)
+		if err != nil {
+			logrus.Fatal("invalid connect address, please use host:port")
+		}
+		tlsConfig.ServerName = host
+		if *ignoreCertificate {
+			logrus.Warn("warning, certificate validation disabled")
+			tlsConfig.InsecureSkipVerify = true
+		}
 	}
 
 	var conn net.Conn
@@ -63,21 +82,29 @@ func main() {
 
 	for {
 		var err error
-		if *socksProxy != "" {
-			if _, _, err := net.SplitHostPort(*socksProxy); err != nil {
-				logrus.Fatal("invalid socks5 address, please use host:port")
-			}
-			conn, err = sockDial(*serverAddr, *socksProxy, *socksUser, *socksPass)
+		if strings.Contains(*serverAddr, "https://") || strings.Contains(*serverAddr, "wss://") {
+			*serverAddr = strings.Replace(*serverAddr, "https://", "wss://", 1)
+			//websocket
+			err = wsconnect(&tlsConfig, *serverAddr, *socksProxy, *userAgent)
 		} else {
-			conn, err = net.Dial("tcp", *serverAddr)
+			//direct connection
+			if *socksProxy != "" {
+				if _, _, err := net.SplitHostPort(*socksProxy); err != nil {
+					logrus.Fatal("invalid socks5 address, please use host:port")
+				}
+				conn, err = sockDial(*serverAddr, *socksProxy, *socksUser, *socksPass)
+			} else {
+				conn, err = net.Dial("tcp", *serverAddr)
+			}
+			if err == nil {
+				err = connect(conn, &tlsConfig)
+			}
 		}
-		if err == nil {
-			err = connect(conn, &tlsConfig)
-		}
+
 		logrus.Errorf("Connection error: %v", err)
 		if *retry {
-			logrus.Info("Retrying in 5 seconds.")
-			time.Sleep(5 * time.Second)
+			logrus.Infof("Retrying in %d seconds.", *retryTime)
+			time.Sleep(time.Duration(*retryTime) * time.Second)
 		} else {
 			logrus.Fatal(err)
 		}
@@ -93,6 +120,50 @@ func sockDial(serverAddr string, socksProxy string, socksUser string, socksPass 
 		logrus.Fatalf("socks5 error: %v", err)
 	}
 	return proxyDialer.Dial("tcp", serverAddr)
+}
+
+func wsconnect(config *tls.Config, wsaddr string, proxystr string, useragent string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+	defer cancel()
+
+	//proxystr = "http://admin:secret@127.0.0.1:8080"
+	proxyUrl, err := url.Parse(proxystr)
+	if err != nil || proxystr == "" {
+		proxyUrl = nil
+	}
+	httpTransport := &http.Transport{
+		MaxIdleConns:    http.DefaultMaxIdleConnsPerHost,
+		TLSClientConfig: config,
+		Proxy:           http.ProxyURL(proxyUrl),
+	}
+
+	httpClient := &http.Client{Transport: httpTransport}
+
+	httpheader := &http.Header{}
+	httpheader.Add("User-Agent", useragent)
+
+	wsConn, _, err := websocket.Dial(ctx, wsaddr, &websocket.DialOptions{HTTPClient: httpClient, HTTPHeader: *httpheader})
+	if err != nil {
+		return err
+	}
+
+	netctx, cancel := context.WithTimeout(context.Background(), time.Hour*999999)
+	netConn := websocket.NetConn(netctx, wsConn, websocket.MessageBinary)
+	defer cancel()
+	yamuxConn, err := yamux.Server(netConn, yamux.DefaultConfig())
+	if err != nil {
+		return err
+	}
+
+	logrus.Info("websocket connection established")
+	for {
+		conn, err := yamuxConn.Accept()
+		if err != nil {
+			return err
+		}
+		go handleConn(conn)
+	}
+	//return nil
 }
 
 func connect(conn net.Conn, config *tls.Config) error {

