@@ -76,7 +76,7 @@ This allows running tools like *nmap* without the use of *proxychains* (simpler 
 Precompiled binaries (Windows/Linux/macOS) are available on the [Release page](https://github.com/nicocha30/ligolo-ng/releases).
 
 ### Building Ligolo-ng
-Building *ligolo-ng* (Go >= 1.17 is required):
+Building *ligolo-ng* (Go >= 1.20 is required):
 
 ```shell
 $ go build -o agent cmd/agent/main.go

@@ -4,7 +4,7 @@
 package tun
 
 import (
-	"github.com/nicocha30/gvisor-ligolo/pkg/bufferv2"
+	"github.com/nicocha30/gvisor-ligolo/pkg/buffer"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/stack"
@@ -64,7 +64,7 @@ func (m *RWEndpoint) dispatchLoop() {
 		}
 
 		pkb := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			Payload: bufferv2.MakeWithData(packet[:n]),
+			Payload: buffer.MakeWithData(packet[:n]),
 		})
 
 		switch header.IPVersion(packet) {
@@ -95,7 +95,7 @@ func (m *RWEndpoint) WritePackets(pkts stack.PacketBufferList) (int, tcpip.Error
 
 // WritePacket writes outbound packets
 func (m *RWEndpoint) WritePacket(pkt stack.PacketBufferPtr) tcpip.Error {
-	var buf bufferv2.Buffer
+	var buf buffer.Buffer
 	pktBuf := pkt.ToBuffer()
 	buf.Merge(&pktBuf)
 
@@ -121,3 +121,5 @@ func (*RWEndpoint) AddHeader(pkt stack.PacketBufferPtr) {
 func (*RWEndpoint) WriteRawPacket(stack.PacketBufferPtr) tcpip.Error {
 	return &tcpip.ErrNotSupported{}
 }
+
+func (*RWEndpoint) ParseHeader(stack.PacketBufferPtr) bool { return true }

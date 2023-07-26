@@ -2,6 +2,7 @@ package netstack
 
 import (
 	"github.com/hashicorp/yamux"
+	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/adapters/gonet"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/stack"
@@ -84,7 +85,7 @@ func HandlePacket(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Sessi
 		return
 	}
 
-	if endpointID.LocalAddress.To4() != "" {
+	if endpointID.LocalAddress.To4() != (tcpip.Address{}) {
 		protonet = protocol.Networkv4
 	} else {
 		protonet = protocol.Networkv6

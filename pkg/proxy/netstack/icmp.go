@@ -3,7 +3,7 @@ package netstack
 import (
 	"bytes"
 	"errors"
-	"github.com/nicocha30/gvisor-ligolo/pkg/bufferv2"
+	"github.com/nicocha30/gvisor-ligolo/pkg/buffer"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/checksum"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
@@ -61,7 +61,7 @@ func icmpResponder(s *NetStack) error {
 
 					// Reconstruct a ICMP PacketBuffer from bytes.
 
-					view := bufferv2.MakeWithData(buff.Bytes())
+					view := buffer.MakeWithData(buff.Bytes())
 					packetbuff := stack.NewPacketBuffer(stack.PacketBufferOptions{
 						Payload:            view,
 						ReserveHeaderBytes: hlen,
@@ -127,12 +127,11 @@ func ProcessICMP(nstack *stack.Stack, pkt stack.PacketBufferPtr) {
 		localAddressBroadcast := pkt.NetworkPacketInfo.LocalAddressBroadcast
 
 		// It's possible that a raw socket expects to receive this.
-		pkt = stack.PacketBufferPtr{}
-		_ = pkt // Suppress unused variable warning.
+		pkt = nil
 
 		// Take the base of the incoming request IP header but replace the options.
 		replyHeaderLength := uint8(header.IPv4MinimumSize + len(newOptions))
-		replyIPHdrView := bufferv2.NewView(int(replyHeaderLength))
+		replyIPHdrView := buffer.NewView(int(replyHeaderLength))
 		replyIPHdrView.Write(iph[:header.IPv4MinimumSize])
 		replyIPHdrView.Write(newOptions)
 		replyIPHdr := header.IPv4(replyIPHdrView.AsSlice())
@@ -143,7 +142,7 @@ func ProcessICMP(nstack *stack.Stack, pkt stack.PacketBufferPtr) {
 		// or multicast address).
 		localAddr := ipHdr.DestinationAddress()
 		if localAddressBroadcast || header.IsV4MulticastAddress(localAddr) {
-			localAddr = ""
+			localAddr = tcpip.Address{}
 		}
 
 		r, err := nstack.FindRoute(1, localAddr, ipHdr.SourceAddress(), ipv4.ProtocolNumber, false /* multicastLoop */)
@@ -162,7 +161,7 @@ func ProcessICMP(nstack *stack.Stack, pkt stack.PacketBufferPtr) {
 		replyICMPHdr.SetChecksum(0)
 		replyICMPHdr.SetChecksum(^checksum.Checksum(replyData.AsSlice(), 0))
 
-		replyBuf := bufferv2.MakeWithView(replyIPHdrView)
+		replyBuf := buffer.MakeWithView(replyIPHdrView)
 		replyBuf.Append(replyData.Clone())
 		replyPkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 			ReserveHeaderBytes: int(r.MaxHeaderLength()),
