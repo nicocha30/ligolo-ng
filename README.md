@@ -6,6 +6,12 @@ An advanced, yet simple, tunneling tool that uses a TUN interface.
 
 [![GPLv3](https://img.shields.io/badge/License-GPLv3-brightgreen.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Go Report](https://goreportcard.com/badge/github.com/nicocha30/ligolo-ng)](https://goreportcard.com/report/github.com/nicocha30/ligolo-ng)
+ ![GitHub Sponsors](https://img.shields.io/github/sponsors/nicocha30)
+
+You use Ligolo-ng for your penetration tests? Did it help you pass a certification? Please consider sponsoring the project so I can buy my team some drinks. ☕
+
+[:heart: Sponsor nicocha30](https://github.com/sponsors/nicocha30)
+
 
 ## Table of Contents
 
