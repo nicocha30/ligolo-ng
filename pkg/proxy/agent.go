@@ -28,8 +28,12 @@ type Listener struct {
 	ListenerID int32
 }
 
+func (l Listener) String() string {
+	return fmt.Sprintf("#%d [%s] (%s) [Agent] %s => [Proxy] %s", l.Agent.Id, l.Agent.Name, l.Network, l.ListenerAddr, l.RedirectAddr)
+}
+
 func (la *LigoloAgent) String() string {
-	return fmt.Sprintf("%s - %s", la.Name, la.Session.RemoteAddr())
+	return fmt.Sprintf("#%d - %s - %s", la.Id, la.Name, la.Session.RemoteAddr())
 }
 
 func NewAgent(session *yamux.Session) (LigoloAgent, error) {

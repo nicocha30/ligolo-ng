@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 var AgentList map[int]proxy.LigoloAgent
@@ -228,11 +229,11 @@ func Run(stackSettings netstack.StackSettings) {
 			t := table.NewWriter()
 			t.SetStyle(table.StyleLight)
 			t.SetTitle("Active listeners")
-			t.AppendHeader(table.Row{"#", "Agent", "Agent listener address", "Proxy redirect address"})
+			t.AppendHeader(table.Row{"#", "Agent", "Network", "Agent listener address", "Proxy redirect address"})
 
 			ListenerListMutex.Lock()
 			for id, listener := range ListenerList {
-				t.AppendRow(table.Row{id, listener.Agent.Name, listener.ListenerAddr, listener.RedirectAddr})
+				t.AppendRow(table.Row{id, listener.Agent.String(), listener.Network, listener.ListenerAddr, listener.RedirectAddr})
 			}
 			ListenerListMutex.Unlock()
 			c.App.Println(t.Render())
@@ -379,79 +380,107 @@ func Run(stackSettings netstack.StackSettings) {
 			ListenerListMutex.Lock()
 			ListenerList[proxy.ListenerCounter] = listener
 			ListenerListMutex.Unlock()
+			currentListener := proxy.ListenerCounter
 			proxy.ListenerCounter++
 
-			go func() {
-				for {
-					// Wait for BindResponses
-					if err := protocolDecoder.Decode(); err != nil {
-						if err == io.EOF {
-							// Listener closed.
+			if netProto == "udp" {
+
+				// relay connections
+				go func() {
+					for {
+						// Check if deleted
+						if _, ok := ListenerList[currentListener]; !ok {
 							return
 						}
-						logrus.Error(err)
-						return
-					}
-
-					// We received a new BindResponse!
-					response := protocolDecoder.Envelope.Payload.(protocol.ListenerBindReponse)
-
-					if err := response.Err; err != false {
-						logrus.Error(response.ErrString)
-						return
-					}
-
-					logrus.Debugf("New socket opened : %d", response.SockID)
-
-					// relay connection
-					go func(sockID int32) {
-
-						forwarderSession, err := CurrentAgent.Session.Open()
-						if err != nil {
-							logrus.Error(err)
-							return
-						}
-
-						protocolEncoder := protocol.NewEncoder(forwarderSession)
-						protocolDecoder := protocol.NewDecoder(forwarderSession)
-
-						// Request socket access
-						socketRequestPacket := protocol.ListenerSockRequestPacket{SockID: sockID}
-						if err := protocolEncoder.Encode(protocol.Envelope{
-							Type:    protocol.MessageListenerSockRequest,
-							Payload: socketRequestPacket,
-						}); err != nil {
-							logrus.Error(err)
-							return
-						}
-						if err := protocolDecoder.Decode(); err != nil {
-							logrus.Error(err)
-							return
-						}
-
-						response := protocolDecoder.Envelope.Payload
-						if err := response.(protocol.ListenerSockResponsePacket).Err; err != false {
-							logrus.Error(response.(protocol.ListenerSockResponsePacket).ErrString)
-							return
-						}
-						// Got socket access!
-
-						logrus.Debug("Listener relay established!")
-
 						// Dial the "to" target
 						lconn, err := net.Dial(netProto, c.Flags.String("to"))
 						if err != nil {
 							logrus.Error(err)
 							return
 						}
+						// Relay conn
+						err = relay.StartPacketRelay(lconn, yamuxConnectionSession)
+						if err != nil {
+							logrus.WithFields(logrus.Fields{"listener": ListenerList[currentListener].String(), "error": err}).Error("Failed to relay UDP connection. Make sure that you are 'to' host is listening! Retrying...")
+						}
+						time.Sleep(2 * time.Second)
+					}
+				}()
+			}
 
-						// relay connections
-						relay.StartRelay(lconn, forwarderSession)
-					}(response.SockID)
+			if netProto == "tcp" {
+				go func() {
+					for {
+						// Wait for BindResponses
+						if err := protocolDecoder.Decode(); err != nil {
+							if err == io.EOF {
+								// Listener closed.
+								return
+							}
+							logrus.Error(err)
+							return
+						}
 
-				}
+						// We received a new BindResponse!
+						response := protocolDecoder.Envelope.Payload.(protocol.ListenerBindReponse)
 
-			}()
+						if err := response.Err; err != false {
+							logrus.Error(response.ErrString)
+							return
+						}
+
+						logrus.Debugf("New socket opened : %d", response.SockID)
+
+						// relay connection
+						go func(sockID int32) {
+
+							forwarderSession, err := CurrentAgent.Session.Open()
+							if err != nil {
+								logrus.Error(err)
+								return
+							}
+
+							protocolEncoder := protocol.NewEncoder(forwarderSession)
+							protocolDecoder := protocol.NewDecoder(forwarderSession)
+
+							// Request socket access
+							socketRequestPacket := protocol.ListenerSockRequestPacket{SockID: sockID}
+							if err := protocolEncoder.Encode(protocol.Envelope{
+								Type:    protocol.MessageListenerSockRequest,
+								Payload: socketRequestPacket,
+							}); err != nil {
+								logrus.Error(err)
+								return
+							}
+							if err := protocolDecoder.Decode(); err != nil {
+								logrus.Error(err)
+								return
+							}
+
+							response := protocolDecoder.Envelope.Payload
+							if err := response.(protocol.ListenerSockResponsePacket).Err; err != false {
+								logrus.Error(response.(protocol.ListenerSockResponsePacket).ErrString)
+								return
+							}
+							// Got socket access!
+
+							logrus.Debug("Listener relay established!")
+
+							// Dial the "to" target
+							lconn, err := net.Dial(netProto, c.Flags.String("to"))
+							if err != nil {
+								logrus.Error(err)
+								return
+							}
+
+							// relay connections
+							relay.StartRelay(lconn, forwarderSession)
+						}(response.SockID)
+
+					}
+
+				}()
+			}
 
 			return nil
 		},

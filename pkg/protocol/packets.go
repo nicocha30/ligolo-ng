@@ -85,6 +85,10 @@ type ListenerBindReponse struct {
 	ErrString string
 }
 
+// ListenerUDPPacket
+type ListenerUDPPacket struct {
+}
+
 // ListenerCloseRequestPacket is the packet sent when closing Listeners
 type ListenerCloseRequestPacket struct {
 	ListenerID int32

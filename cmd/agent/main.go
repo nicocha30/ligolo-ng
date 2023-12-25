@@ -21,7 +21,7 @@ import (
 )
 
 var listenerConntrack map[int32]net.Conn
-var listenerMap map[int32]net.Listener
+var listenerMap map[int32]interface{}
 var connTrackID int32
 var listenerID int32
 
@@ -59,7 +59,7 @@ func main() {
 	var conn net.Conn
 
 	listenerConntrack = make(map[int32]net.Conn)
-	listenerMap = make(map[int32]net.Listener)
+	listenerMap = make(map[int32]interface{})
 
 	for {
 		var err error
@@ -144,6 +144,25 @@ func (s *Listener) ListenAndServe(connTrackChan chan int32) error {
 // Close request the main listener to exit
 func (s *Listener) Close() error {
 	return s.Listener.Close()
+}
+
+// UDPListener is the base class implementing UDP listeners for Ligolo
+type UDPListener struct {
+	*net.UDPConn
+}
+
+// NewUDPListener register a new UDP listener
+func NewUDPListener(network string, addr string) (UDPListener, error) {
+	udpaddr, err := net.ResolveUDPAddr(network, addr)
+	if err != nil {
+		return UDPListener{}, nil
+	}
+
+	udplis, err := net.ListenUDP(network, udpaddr)
+	if err != nil {
+		return UDPListener{}, err
+	}
+	return UDPListener{udplis}, err
 }
 
 func handleConn(conn net.Conn) {
@@ -251,7 +270,12 @@ func handleConn(conn net.Conn) {
 
 		var err error
 		if lis, ok := listenerMap[closeRequest.ListenerID]; ok {
-			err = lis.Close()
+			if l, ok := lis.(net.Listener); ok {
+				l.Close()
+			}
+			if l, ok := lis.(*net.UDPConn); ok {
+				l.Close()
+			}
 		} else {
 			err = errors.New("invalid listener id")
 		}
@@ -276,12 +300,27 @@ func handleConn(conn net.Conn) {
 		connTrackChan := make(chan int32)
 		stopChan := make(chan error)
 
-		listener, err := NewListener(listenRequest.Network, listenRequest.Address)
-		if err != nil {
+		if listenRequest.Network == "tcp" {
+			listener, err := NewListener(listenRequest.Network, listenRequest.Address)
+			if err != nil {
+				listenerResponse := protocol.ListenerResponsePacket{
+					ListenerID: 0,
+					Err:        true,
+					ErrString:  err.Error(),
+				}
+				if err := encoder.Encode(protocol.Envelope{
+					Type:    protocol.MessageListenerResponse,
+					Payload: listenerResponse,
+				}); err != nil {
+					logrus.Error(err)
+				}
+				return
+			}
+			listenerMap[listenerID] = listener.Listener
 			listenerResponse := protocol.ListenerResponsePacket{
-				ListenerID: 0,
-				Err:        true,
-				ErrString:  err.Error(),
+				ListenerID: listenerID,
+				Err:        false,
+				ErrString:  "",
 			}
 			if err := encoder.Encode(protocol.Envelope{
 				Type:    protocol.MessageListenerResponse,
@@ -289,59 +328,75 @@ func handleConn(conn net.Conn) {
 			}); err != nil {
 				logrus.Error(err)
 			}
-			return
-		}
-
-		listenerResponse := protocol.ListenerResponsePacket{
-			ListenerID: listenerID,
-			Err:        false,
-			ErrString:  "",
-		}
-		listenerMap[listenerID] = listener.Listener
-		listenerID++
-
-		if err := encoder.Encode(protocol.Envelope{
-			Type:    protocol.MessageListenerResponse,
-			Payload: listenerResponse,
-		}); err != nil {
-			logrus.Error(err)
-		}
-
-		go func() {
-			if err := listener.ListenAndServe(connTrackChan); err != nil {
-				stopChan <- err
-			}
-		}()
-		defer listener.Close()
-
-		for {
-			var bindResponse protocol.ListenerBindReponse
-			select {
-			case err := <-stopChan:
-				logrus.Error(err)
-				bindResponse = protocol.ListenerBindReponse{
-					SockID:    0,
-					Err:       true,
-					ErrString: err.Error(),
+			go func() {
+				if err := listener.ListenAndServe(connTrackChan); err != nil {
+					stopChan <- err
 				}
-			case connTrackID := <-connTrackChan:
-				bindResponse = protocol.ListenerBindReponse{
-					SockID: connTrackID,
-					Err:    false,
-				}
-			}
+			}()
+			defer listener.Close()
 
+		} else if listenRequest.Network == "udp" {
+			udplistener, err := NewUDPListener(listenRequest.Network, listenRequest.Address)
+			if err != nil {
+				listenerResponse := protocol.ListenerResponsePacket{
+					ListenerID: 0,
+					Err:        true,
+					ErrString:  err.Error(),
+				}
+				if err := encoder.Encode(protocol.Envelope{
+					Type:    protocol.MessageListenerResponse,
+					Payload: listenerResponse,
+				}); err != nil {
+					logrus.Error(err)
+				}
+				return
+			}
+			listenerMap[listenerID] = udplistener.UDPConn
+			listenerResponse := protocol.ListenerResponsePacket{
+				ListenerID: listenerID,
+				Err:        false,
+				ErrString:  "",
+			}
 			if err := encoder.Encode(protocol.Envelope{
-				Type:    protocol.MessageListenerBindResponse,
-				Payload: bindResponse,
+				Type:    protocol.MessageListenerResponse,
+				Payload: listenerResponse,
 			}); err != nil {
 				logrus.Error(err)
 			}
+			go relay.StartRelay(conn, udplistener)
+		}
 
-			if bindResponse.Err {
-				break
+		listenerID++
+		if listenRequest.Network == "tcp" {
+			for {
+				var bindResponse protocol.ListenerBindReponse
+				select {
+				case err := <-stopChan:
+					logrus.Error(err)
+					bindResponse = protocol.ListenerBindReponse{
+						SockID:    0,
+						Err:       true,
+						ErrString: err.Error(),
+					}
+				case connTrackID := <-connTrackChan:
+					bindResponse = protocol.ListenerBindReponse{
+						SockID: connTrackID,
+						Err:    false,
+					}
+				}
+
+				if err := encoder.Encode(protocol.Envelope{
+					Type:    protocol.MessageListenerBindResponse,
+					Payload: bindResponse,
+				}); err != nil {
+					logrus.Error(err)
+				}
+
+				if bindResponse.Err {
+					break
+				}
+
 			}
-
 		}
 	case protocol.MessageListenerSockRequest:
 		sockRequest := e.(protocol.ListenerSockRequestPacket)
