@@ -1,4 +1,4 @@
-package proxy
+package controller
 
 import (
 	"crypto/ecdsa"

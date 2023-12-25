@@ -5,7 +5,7 @@ import (
 	"github.com/desertbit/grumble"
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/cmd/proxy/app"
-	"github.com/nicocha30/ligolo-ng/pkg/proxy"
+	"github.com/nicocha30/ligolo-ng/pkg/controller"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack"
 	"github.com/sirupsen/logrus"
 	"os"
@@ -42,7 +42,7 @@ func main() {
 		MaxInflight: *maxInflight,
 	})
 
-	proxyController := proxy.New(proxy.ControllerConfig{
+	proxyController := controller.New(controller.ControllerConfig{
 		EnableAutocert:  *enableAutocert,
 		EnableSelfcert:  *enableSelfcert,
 		Address:         *listenInterface,
@@ -66,7 +66,7 @@ func main() {
 				panic(err)
 			}
 
-			agent, err := proxy.NewAgent(yamuxConn)
+			agent, err := controller.NewAgent(yamuxConn)
 			if err != nil {
 				logrus.Errorf("could not register agent, error: %v", err)
 				continue

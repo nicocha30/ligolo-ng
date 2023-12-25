@@ -6,8 +6,8 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/desertbit/grumble"
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/nicocha30/ligolo-ng/pkg/controller"
 	"github.com/nicocha30/ligolo-ng/pkg/protocol"
-	"github.com/nicocha30/ligolo-ng/pkg/proxy"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack"
 	"github.com/nicocha30/ligolo-ng/pkg/relay"
 	"github.com/sirupsen/logrus"
@@ -19,9 +19,9 @@ import (
 	"time"
 )
 
-var AgentList map[int]proxy.LigoloAgent
+var AgentList map[int]controller.LigoloAgent
 var AgentListMutex sync.Mutex
-var ListenerList map[int]proxy.Listener
+var ListenerList map[int]controller.Listener
 var ListenerListMutex sync.Mutex
 
 var (
@@ -34,7 +34,7 @@ const (
 	MaxConnectionHandler = 4096
 )
 
-func RegisterAgent(agent proxy.LigoloAgent) error {
+func RegisterAgent(agent controller.LigoloAgent) error {
 	AgentListMutex.Lock()
 	AgentList[agent.Id] = agent
 	AgentListMutex.Unlock()
@@ -43,13 +43,13 @@ func RegisterAgent(agent proxy.LigoloAgent) error {
 
 func Run(stackSettings netstack.StackSettings) {
 	// CurrentAgent points to the selected agent in the UI (when running session)
-	var CurrentAgent proxy.LigoloAgent
+	var CurrentAgent controller.LigoloAgent
 	// ListeningAgent points to the currently running agent (forwarding packets)
-	var ListeningAgent proxy.LigoloAgent
+	var ListeningAgent controller.LigoloAgent
 	// AgentList contains all the connected agents
-	AgentList = make(map[int]proxy.LigoloAgent)
+	AgentList = make(map[int]controller.LigoloAgent)
 	// ListenerList contains all listener relays
-	ListenerList = make(map[int]proxy.Listener)
+	ListenerList = make(map[int]controller.Listener)
 
 	// Create a new stack, but without connPool.
 	// The connPool will be created when using the *start* command
@@ -369,7 +369,7 @@ func Run(stackSettings netstack.StackSettings) {
 			logrus.Info("Listener created on remote agent!")
 
 			// Register the listener in the UI
-			listener := proxy.Listener{
+			listener := controller.Listener{
 				Agent:        CurrentAgent,
 				Network:      netProto,
 				ListenerAddr: c.Flags.String("addr"),
@@ -378,10 +378,10 @@ func Run(stackSettings netstack.StackSettings) {
 				ListenerID:   response.ListenerID,
 			}
 			ListenerListMutex.Lock()
-			ListenerList[proxy.ListenerCounter] = listener
+			ListenerList[controller.ListenerCounter] = listener
 			ListenerListMutex.Unlock()
-			currentListener := proxy.ListenerCounter
-			proxy.ListenerCounter++
+			currentListener := controller.ListenerCounter
+			controller.ListenerCounter++
 
 			if netProto == "udp" {
 
