@@ -16,6 +16,8 @@ type LigoloAgent struct {
 	Network   []protocol.NetInterface
 	Session   *yamux.Session
 	CloseChan chan bool
+	Interface string
+	Running   bool
 }
 
 type Listener struct {
@@ -36,10 +38,10 @@ func (la *LigoloAgent) String() string {
 	return fmt.Sprintf("#%d - %s - %s", la.Id, la.Name, la.Session.RemoteAddr())
 }
 
-func NewAgent(session *yamux.Session) (LigoloAgent, error) {
+func NewAgent(session *yamux.Session) (*LigoloAgent, error) {
 	yamuxConnectionSession, err := session.Open()
 	if err != nil {
-		return LigoloAgent{}, err
+		return nil, err
 	}
 
 	infoRequest := protocol.InfoRequestPacket{}
@@ -51,17 +53,17 @@ func NewAgent(session *yamux.Session) (LigoloAgent, error) {
 		Type:    protocol.MessageInfoRequest,
 		Payload: infoRequest,
 	}); err != nil {
-		return LigoloAgent{}, err
+		return nil, err
 	}
 
 	if err := protocolDecoder.Decode(); err != nil {
-		return LigoloAgent{}, err
+		return nil, err
 	}
 
 	response := protocolDecoder.Envelope.Payload
 	reply := response.(protocol.InfoReplyPacket)
 	AgentCounter++
-	return LigoloAgent{
+	return &LigoloAgent{
 		Id:        AgentCounter,
 		Name:      reply.Name,
 		Network:   reply.Interfaces,

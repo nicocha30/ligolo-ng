@@ -1,17 +1,16 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/desertbit/grumble"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/nicocha30/ligolo-ng/pkg/controller"
-	"github.com/nicocha30/ligolo-ng/pkg/protocol"
+	"github.com/nicocha30/ligolo-ng/pkg/proxy"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack"
-	"github.com/nicocha30/ligolo-ng/pkg/relay"
 	"github.com/sirupsen/logrus"
-	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -19,7 +18,7 @@ import (
 	"time"
 )
 
-var AgentList map[int]controller.LigoloAgent
+var AgentList map[int]*controller.LigoloAgent
 var AgentListMutex sync.Mutex
 var ListenerList map[int]controller.Listener
 var ListenerListMutex sync.Mutex
@@ -30,30 +29,20 @@ var (
 	ErrNotRunning     = errors.New("no tunnel started")
 )
 
-const (
-	MaxConnectionHandler = 4096
-)
-
-func RegisterAgent(agent controller.LigoloAgent) error {
+func RegisterAgent(agent *controller.LigoloAgent) error {
 	AgentListMutex.Lock()
 	AgentList[agent.Id] = agent
 	AgentListMutex.Unlock()
 	return nil
 }
 
-func Run(stackSettings netstack.StackSettings) {
+func Run() {
 	// CurrentAgent points to the selected agent in the UI (when running session)
-	var CurrentAgent controller.LigoloAgent
-	// ListeningAgent points to the currently running agent (forwarding packets)
-	var ListeningAgent controller.LigoloAgent
+	var CurrentAgentID int
 	// AgentList contains all the connected agents
-	AgentList = make(map[int]controller.LigoloAgent)
+	AgentList = make(map[int]*controller.LigoloAgent)
 	// ListenerList contains all listener relays
 	ListenerList = make(map[int]controller.Listener)
-
-	// Create a new stack, but without connPool.
-	// The connPool will be created when using the *start* command
-	nstack := netstack.NewStack(stackSettings, nil)
 
 	App.AddCommand(&grumble.Command{
 		Name:  "session",
@@ -89,79 +78,84 @@ func Run(stackSettings netstack.StackSettings) {
 				return err
 			}
 
-			CurrentAgent = AgentList[sessionID]
+			CurrentAgentID = sessionID
 
-			c.App.SetPrompt(fmt.Sprintf("[Agent : %s] » ", CurrentAgent.Name))
+			c.App.SetPrompt(fmt.Sprintf("[Agent : %s] » ", AgentList[CurrentAgentID].Name))
 
 			return nil
 		},
 	})
 
 	App.AddCommand(&grumble.Command{
-		Name:      "start",
+		Name:      "tunnel_start",
 		Help:      "Start relaying connection to the current agent",
-		Usage:     "start",
+		Usage:     "tunnel_start --tun ligolo",
 		HelpGroup: "Tunneling",
+		Aliases:   []string{"start"},
+		Flags: func(f *grumble.Flags) {
+			f.StringL("tun", "ligolo", "the interface to run the proxy on")
+		},
 		Run: func(c *grumble.Context) error {
+			if _, ok := AgentList[CurrentAgentID]; !ok {
+				return ErrInvalidAgent
+			}
+			CurrentAgent := AgentList[CurrentAgentID]
+
 			if CurrentAgent.Session == nil {
 				return ErrInvalidAgent
 			}
 
-			if ListeningAgent.Session != nil {
-				if ListeningAgent.Id == CurrentAgent.Id {
-					return ErrAlreadyRunning
-				}
+			if CurrentAgent.Running {
+				return ErrAlreadyRunning
+			}
 
-				if !ListeningAgent.Session.IsClosed() {
-					var switchConfirm bool
-					askSwitch := survey.Confirm{
-						Message: fmt.Sprintf("Tunnel already running, switch from %s to %s?", ListeningAgent.Name, CurrentAgent.Name),
+			for _, agent := range AgentList {
+				if agent.Running {
+					if agent.Interface == c.Flags.String("tun") {
+						return errors.New("a tunnel is already using this interface name. Please use a different name using the --tun option")
 					}
-					if err := survey.AskOne(&askSwitch, &switchConfirm); err != nil {
-						return err
-					}
-					if !switchConfirm {
-						return nil
-					}
-					// Close agent
-					ListeningAgent.CloseChan <- true
-
 				}
 			}
 
-			ListeningAgent = CurrentAgent
-
 			go func() {
-				logrus.Infof("Starting tunnel to %s", ListeningAgent.Name)
+				logrus.Infof("Starting tunnel to %s", CurrentAgent.Name)
+				ligoloStack, err := proxy.NewLigoloTunnel(netstack.StackSettings{
+					TunName:     c.Flags.String("tun"),
+					MaxInflight: 4096,
+				})
+				if err != nil {
+					logrus.Error("Unable to create tunnel, err:", err)
+					return
+				}
+				ifName, err := ligoloStack.GetStack().Interface().Name()
+				if err != nil {
+					logrus.Warn("unable to get interface name, err:", err)
+					ifName = c.Flags.String("tun")
+				}
+				CurrentAgent.Interface = ifName
+				CurrentAgent.Running = true
 
-				// Create a new, empty, connpool to store connections/packets
-				connPool := netstack.NewConnPool(MaxConnectionHandler)
-				nstack.SetConnPool(&connPool)
-
-				// Cleanup pool if channel is closed
-				defer connPool.Close()
+				ctx, cancelTunnel := context.WithCancel(context.Background())
+				go ligoloStack.HandleSession(CurrentAgent.Session, ctx)
 
 				for {
 					select {
-					case <-ListeningAgent.CloseChan: // User stopped
-						logrus.Infof("Closing tunnel to %s...", ListeningAgent.Name)
+					case <-CurrentAgent.CloseChan: // User stopped
+						logrus.Infof("Closing tunnel to %s...", CurrentAgent.Name)
+						cancelTunnel()
 						return
-					case <-ListeningAgent.Session.CloseChan(): // Agent closed
-						logrus.Warnf("Lost connection with agent %s!", ListeningAgent.Name)
+					case <-CurrentAgent.Session.CloseChan(): // Agent closed
+						logrus.Warnf("Lost connection with agent %s!", CurrentAgent.Name)
 						// Connection lost, we need to delete the Agent from the list
 						AgentListMutex.Lock()
-						delete(AgentList, ListeningAgent.Id)
+						delete(AgentList, CurrentAgent.Id)
 						AgentListMutex.Unlock()
-						if CurrentAgent.Id == ListeningAgent.Id {
+						if CurrentAgent.Id == CurrentAgent.Id {
 							App.SetDefaultPrompt()
 							CurrentAgent.Session = nil
 						}
+						cancelTunnel()
 						return
-					case <-connPool.CloseChan: // pool closed, we can't process packets!
-						logrus.Infof("Connection pool closed")
-						return
-					case tunnelPacket := <-connPool.Pool: // Process connections/packets
-						go netstack.HandlePacket(nstack.GetStack(), tunnelPacket, ListeningAgent.Session)
 					}
 				}
 			}()
@@ -169,16 +163,58 @@ func Run(stackSettings netstack.StackSettings) {
 		},
 	})
 
-	App.AddCommand(&grumble.Command{Name: "stop",
+	App.AddCommand(&grumble.Command{Name: "tunnel_list",
+		Help:      "List active tunnels",
+		Usage:     "tunnel_list",
+		HelpGroup: "Tunneling",
+		Run: func(c *grumble.Context) error {
+			t := table.NewWriter()
+			t.SetStyle(table.StyleLight)
+			t.SetTitle("Active tunnels")
+			t.AppendHeader(table.Row{"#", "Agent", "Interface"})
+
+			AgentListMutex.Lock()
+
+			for _, agent := range AgentList {
+
+				if agent.Running {
+					t.AppendRow(table.Row{agent.Id, agent.Name, agent.Interface})
+				}
+			}
+			AgentListMutex.Unlock()
+			App.Println(t.Render())
+
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{Name: "tunnel_stop",
 		Help:      "Stop the tunnel",
 		Usage:     "stop",
 		HelpGroup: "Tunneling",
+		Aliases:   []string{"stop"},
+		Flags: func(f *grumble.Flags) {
+			f.IntL("agent", -1, "The agent to stop")
+		},
 		Run: func(c *grumble.Context) error {
-			if ListeningAgent.Session == nil {
+			var selectedAgent int
+			if c.Flags.Int("agent") != -1 {
+				selectedAgent = c.Flags.Int("agent")
+			} else {
+				selectedAgent = CurrentAgentID
+			}
+			if _, ok := AgentList[selectedAgent]; !ok {
+				return ErrInvalidAgent
+			}
+
+			CurrentAgent := AgentList[selectedAgent]
+
+			if CurrentAgent.Session == nil || !CurrentAgent.Running {
 				return ErrNotRunning
 			}
-			ListeningAgent.CloseChan <- true
-			ListeningAgent.Session = nil
+			CurrentAgent.CloseChan <- true
+			CurrentAgent.Running = false
+
 			return nil
 		},
 	})
@@ -187,6 +223,10 @@ func Run(stackSettings netstack.StackSettings) {
 		Help:  "Show agent interfaces",
 		Usage: "ifconfig",
 		Run: func(c *grumble.Context) error {
+			if _, ok := AgentList[CurrentAgentID]; !ok {
+				return ErrInvalidAgent
+			}
+			CurrentAgent := AgentList[CurrentAgentID]
 			// Note: Network information is not refreshed when calling this command
 			if CurrentAgent.Session == nil {
 				return ErrInvalidAgent
@@ -250,6 +290,10 @@ func Run(stackSettings netstack.StackSettings) {
 			a.Int("id", "listener id")
 		},
 		Run: func(c *grumble.Context) error {
+			if _, ok := AgentList[CurrentAgentID]; !ok {
+				return ErrInvalidAgent
+			}
+			CurrentAgent := AgentList[CurrentAgentID]
 			ListenerListMutex.Lock()
 			if _, ok := ListenerList[c.Args.Int("id")]; !ok {
 				ListenerListMutex.Unlock()
@@ -259,31 +303,8 @@ func Run(stackSettings netstack.StackSettings) {
 			ListenerListMutex.Unlock()
 			listener.Session.Close()
 
-			yamuxConnectionSession, err := CurrentAgent.Session.Open()
-			if err != nil {
+			if err := proxy.ListenerStop(CurrentAgent.Session, listener.ListenerID); err != nil {
 				return err
-			}
-			protocolEncoder := protocol.NewEncoder(yamuxConnectionSession)
-			protocolDecoder := protocol.NewDecoder(yamuxConnectionSession)
-
-			// Send close request
-			closeRequest := protocol.ListenerCloseRequestPacket{ListenerID: listener.ListenerID}
-			if err := protocolEncoder.Encode(protocol.Envelope{
-				Type:    protocol.MessageListenerCloseRequest,
-				Payload: closeRequest,
-			}); err != nil {
-				return err
-			}
-
-			// Process close response
-			if err := protocolDecoder.Decode(); err != nil {
-				return err
-
-			}
-			response := protocolDecoder.Envelope.Payload
-
-			if err := response.(protocol.ListenerCloseResponsePacket).Err; err != false {
-				return errors.New(response.(protocol.ListenerCloseResponsePacket).ErrString)
 			}
 
 			logrus.Info("Listener closed.")
@@ -300,16 +321,21 @@ func Run(stackSettings netstack.StackSettings) {
 	App.AddCommand(&grumble.Command{
 		Name:      "listener_add",
 		Help:      "Listen on the agent and redirect connections to the desired address",
-		Usage:     "listener_add --addr [agent_listening_address:port] --to [local_listening_address:port] --tcp/--udp",
+		Usage:     "listener_add --addr [agent_listening_address:port] --to [local_listening_address:port] --tcp/--udp (--no-retry)",
 		HelpGroup: "Listeners",
 		Flags: func(f *grumble.Flags) {
 			f.BoolL("tcp", false, "Use TCP listener")
 			f.BoolL("udp", false, "Use UDP listener")
 			f.StringL("addr", "", "The agent listening address:port")
 			f.StringL("to", "", "Where to redirect connections")
+			f.BoolL("no-retry", false, "Do not restart relay on listener error")
 
 		},
 		Run: func(c *grumble.Context) error {
+			if _, ok := AgentList[CurrentAgentID]; !ok {
+				return ErrInvalidAgent
+			}
+			CurrentAgent := AgentList[CurrentAgentID]
 			if CurrentAgent.Session == nil {
 				return errors.New("please, select an agent using the session command")
 			}
@@ -340,147 +366,42 @@ func Run(stackSettings netstack.StackSettings) {
 				return err
 			}
 
-			// Open a new Yamux Session
-			yamuxConnectionSession, err := CurrentAgent.Session.Open()
+			proxyListener, err := proxy.NewListener(CurrentAgent.Session, c.Flags.String("addr"), netProto, c.Flags.String("to"))
 			if err != nil {
 				return err
 			}
-			protocolEncoder := protocol.NewEncoder(yamuxConnectionSession)
-			protocolDecoder := protocol.NewDecoder(yamuxConnectionSession)
 
-			// Request to open a new port on the agent
-			listenerPacket := protocol.ListenerRequestPacket{Address: c.Flags.String("addr"), Network: netProto}
-			if err := protocolEncoder.Encode(protocol.Envelope{
-				Type:    protocol.MessageListenerRequest,
-				Payload: listenerPacket,
-			}); err != nil {
-				return err
-			}
-
-			// Get response from agent
-			if err := protocolDecoder.Decode(); err != nil {
-				return err
-			}
-			response := protocolDecoder.Envelope.Payload.(protocol.ListenerResponsePacket)
-			if err := response.Err; err != false {
-				return errors.New(response.ErrString)
-			}
-
-			logrus.Info("Listener created on remote agent!")
+			logrus.Infof("Listener %d created on remote agent!", proxyListener.ID)
 
 			// Register the listener in the UI
 			listener := controller.Listener{
-				Agent:        CurrentAgent,
+				Agent:        *CurrentAgent,
 				Network:      netProto,
 				ListenerAddr: c.Flags.String("addr"),
 				RedirectAddr: c.Flags.String("to"),
-				Session:      yamuxConnectionSession,
-				ListenerID:   response.ListenerID,
+				Session:      proxyListener.Conn,
+				ListenerID:   proxyListener.ID,
 			}
 			ListenerListMutex.Lock()
 			ListenerList[controller.ListenerCounter] = listener
 			ListenerListMutex.Unlock()
-			currentListener := controller.ListenerCounter
 			controller.ListenerCounter++
 
-			if netProto == "udp" {
-
-				// relay connections
-				go func() {
-					for {
-						// Check if deleted
-						if _, ok := ListenerList[currentListener]; !ok {
-							return
+			go func() {
+				for {
+					err := proxyListener.StartRelay()
+					if err != nil {
+						logrus.WithFields(logrus.Fields{"listener": listener.String()}).Error("Listener relay failed with error: ", err)
+						if !c.Flags.Bool("no-retry") {
+							logrus.Warning("Listener failed. Restarting in 5 seconds...")
+							time.Sleep(time.Second * 5)
+							continue
 						}
-						// Dial the "to" target
-						lconn, err := net.Dial(netProto, c.Flags.String("to"))
-						if err != nil {
-							logrus.Error(err)
-							return
-						}
-						// Relay conn
-						err = relay.StartPacketRelay(lconn, yamuxConnectionSession)
-						if err != nil {
-							logrus.WithFields(logrus.Fields{"listener": ListenerList[currentListener].String(), "error": err}).Error("Failed to relay UDP connection. Make sure that you are 'to' host is listening! Retrying...")
-						}
-						time.Sleep(2 * time.Second)
+						return
 					}
-				}()
-			}
-
-			if netProto == "tcp" {
-				go func() {
-					for {
-						// Wait for BindResponses
-						if err := protocolDecoder.Decode(); err != nil {
-							if err == io.EOF {
-								// Listener closed.
-								return
-							}
-							logrus.Error(err)
-							return
-						}
-
-						// We received a new BindResponse!
-						response := protocolDecoder.Envelope.Payload.(protocol.ListenerBindReponse)
-
-						if err := response.Err; err != false {
-							logrus.Error(response.ErrString)
-							return
-						}
-
-						logrus.Debugf("New socket opened : %d", response.SockID)
-
-						// relay connection
-						go func(sockID int32) {
-
-							forwarderSession, err := CurrentAgent.Session.Open()
-							if err != nil {
-								logrus.Error(err)
-								return
-							}
-
-							protocolEncoder := protocol.NewEncoder(forwarderSession)
-							protocolDecoder := protocol.NewDecoder(forwarderSession)
-
-							// Request socket access
-							socketRequestPacket := protocol.ListenerSockRequestPacket{SockID: sockID}
-							if err := protocolEncoder.Encode(protocol.Envelope{
-								Type:    protocol.MessageListenerSockRequest,
-								Payload: socketRequestPacket,
-							}); err != nil {
-								logrus.Error(err)
-								return
-							}
-							if err := protocolDecoder.Decode(); err != nil {
-								logrus.Error(err)
-								return
-							}
-
-							response := protocolDecoder.Envelope.Payload
-							if err := response.(protocol.ListenerSockResponsePacket).Err; err != false {
-								logrus.Error(response.(protocol.ListenerSockResponsePacket).ErrString)
-								return
-							}
-							// Got socket access!
-
-							logrus.Debug("Listener relay established!")
-
-							// Dial the "to" target
-							lconn, err := net.Dial(netProto, c.Flags.String("to"))
-							if err != nil {
-								logrus.Error(err)
-								return
-							}
-
-							// relay connections
-							relay.StartRelay(lconn, forwarderSession)
-						}(response.SockID)
-
-					}
-
-				}()
-			}
+					logrus.WithFields(logrus.Fields{"listener": listener.String()}).Warning("Listener ended without error.")
+				}
+			}()
 
 			return nil
 		},

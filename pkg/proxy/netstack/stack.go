@@ -1,6 +1,7 @@
 package netstack
 
 import (
+	"errors"
 	"fmt"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
@@ -78,6 +79,7 @@ type ICMPConn struct {
 type NetStack struct {
 	pool  *ConnPool
 	stack *stack.Stack
+	iface *tun.TunInterface
 	sync.Mutex
 }
 
@@ -87,10 +89,12 @@ type StackSettings struct {
 }
 
 // NewStack registers a new GVisor Network Stack
-func NewStack(settings StackSettings, connPool *ConnPool) *NetStack {
+func NewStack(settings StackSettings, connPool *ConnPool) (*NetStack, error) {
 	ns := NetStack{pool: connPool}
-	ns.new(settings)
-	return &ns
+	if _, err := ns.new(settings); err != nil {
+		return nil, err
+	}
+	return &ns, nil
 }
 
 // GetStack returns the current Gvisor stack.Stack object
@@ -106,7 +110,7 @@ func (s *NetStack) SetConnPool(connPool *ConnPool) {
 }
 
 // New creates a new userland network stack (using Gvisor) that listen on a tun interface.
-func (s *NetStack) new(stackSettings StackSettings) *stack.Stack {
+func (s *NetStack) new(stackSettings StackSettings) (*stack.Stack, error) {
 
 	// Create a new gvisor userland network stack.
 	ns := stack.New(stack.Options{
@@ -176,18 +180,20 @@ func (s *NetStack) new(stackSettings StackSettings) *stack.Stack {
 	ns.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpHandler.HandlePacket)
 	ns.SetTransportProtocolHandler(udp.ProtocolNumber, udpHandler.HandlePacket)
 
-	linkEP, err := tun.Open(stackSettings.TunName)
+	iface, err := tun.New(stackSettings.TunName)
 	if err != nil {
-		logrus.Fatalf("unable to create tun interface: (tun.Open %v), make sure you created the tun interface", err)
+		return nil, fmt.Errorf("unable to create tun interface '%s' (tun.New %v), make sure you've created the tun interface and that it's not in use", stackSettings.TunName, err)
 	}
+	s.iface = iface
+
 	// Create a new NIC
-	if err := ns.CreateNIC(1, linkEP); err != nil {
-		panic(fmt.Errorf("CreateNIC: %v", err))
+	if err := ns.CreateNIC(1, iface.LinkEP); err != nil {
+		return nil, errors.New(err.String())
 	}
 
 	// Start a endpoint that will reply to ICMP echo queries
 	if err := icmpResponder(s); err != nil {
-		logrus.Fatal(err)
+		return nil, err
 	}
 
 	// Allow all routes by default
@@ -219,5 +225,21 @@ func (s *NetStack) new(stackSettings StackSettings) *stack.Stack {
 	ns.SetPromiscuousMode(1, true)
 	ns.SetSpoofing(1, true)
 
-	return ns
+	return ns, nil
+}
+
+func (n *NetStack) Interface() *tun.TunInterface {
+	return n.iface
+}
+
+func (n *NetStack) Close() {
+	if n.stack != nil {
+		n.stack.Destroy()
+	}
+	if n.iface != nil {
+		err := n.iface.Close()
+		if err != nil {
+			logrus.Warn("NetStack.Close() => iface close err: ", err)
+		}
+	}
 }

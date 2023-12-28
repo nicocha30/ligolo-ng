@@ -2,7 +2,7 @@
 
 ![Ligolo Logo](doc/logo.png)
 
-An advanced, yet simple, tunneling tool that uses a TUN interface.
+An advanced, yet simple, tunneling tool that uses TUN interfaces.
 
 [![GPLv3](https://img.shields.io/badge/License-GPLv3-brightgreen.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Go Report](https://goreportcard.com/badge/github.com/nicocha30/ligolo-ng)](https://goreportcard.com/report/github.com/nicocha30/ligolo-ng)
@@ -58,6 +58,7 @@ tunnels from a reverse TCP/TLS connection using a **tun interface** (without the
 - Does not require high privileges
 - Socket listening/binding on the *agent*
 - Multiple platforms supported for the *agent*
+- Can handle multiple tunnels
 
 ## How is this different from Ligolo/Chisel/Meterpreter... ?
 
@@ -196,9 +197,17 @@ Idx     Mét         MTU          État                Nom
 Start the tunnel on the proxy:
 
 ```
-[Agent : nchatelain@nworkstation] » start
+[Agent : nchatelain@nworkstation] » start_tunnel
 [Agent : nchatelain@nworkstation] » INFO[0690] Starting tunnel to nchatelain@nworkstation   
 ```
+
+You can also specify a custom tuntap interface using the ``--tun iface`` option:
+
+```
+[Agent : nchatelain@nworkstation] » start_tunnel --tun mycustomtuntap
+[Agent : nchatelain@nworkstation] » INFO[0690] Starting tunnel to nchatelain@nworkstation   
+```
+
 
 You can now access the *192.168.0.0/24* *agent* network from the *proxy* server.
 

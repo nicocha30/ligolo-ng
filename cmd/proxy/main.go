@@ -6,7 +6,6 @@ import (
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/cmd/proxy/app"
 	"github.com/nicocha30/ligolo-ng/pkg/controller"
-	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack"
 	"github.com/sirupsen/logrus"
 	"os"
 	"strings"
@@ -15,14 +14,12 @@ import (
 func main() {
 	var allowDomains []string
 	var verboseFlag = flag.Bool("v", false, "enable verbose mode")
-	var tunInterface = flag.String("tun", "ligolo", "tun interface name")
 	var listenInterface = flag.String("laddr", "0.0.0.0:11601", "listening address ")
 	var enableAutocert = flag.Bool("autocert", false, "automatically request letsencrypt certificates, requires port 80 to be accessible")
 	var enableSelfcert = flag.Bool("selfcert", false, "dynamically generate self-signed certificates")
 	var certFile = flag.String("certfile", "certs/cert.pem", "TLS server certificate")
 	var keyFile = flag.String("keyfile", "certs/key.pem", "TLS server key")
 	var domainWhitelist = flag.String("allow-domains", "", "autocert authorised domains, if empty, allow all domains, multiple domains should be comma-separated.")
-	var maxInflight = flag.Int("maxinflight", 4096, "max inflight TCP connections")
 
 	flag.Parse()
 
@@ -37,10 +34,7 @@ func main() {
 		allowDomains = strings.Split(*domainWhitelist, ",")
 	}
 
-	app.Run(netstack.StackSettings{
-		TunName:     *tunInterface,
-		MaxInflight: *maxInflight,
-	})
+	app.Run()
 
 	proxyController := controller.New(controller.ControllerConfig{
 		EnableAutocert:  *enableAutocert,
