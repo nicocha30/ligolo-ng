@@ -93,6 +93,13 @@ func HandlePacket(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Sessi
 
 	logrus.Debugf("Got packet source : %s - endpointID : %s:%d", endpointID.RemoteAddress, endpointID.LocalAddress, endpointID.LocalPort)
 
+	targetIp := endpointID.LocalAddress.String()
+	if endpointID.LocalAddress.String() == "240.0.0.1" {
+		logrus.Debug("MagicIP detected, redirecting to agent local machine")
+		// Magic IP detected
+		targetIp = "127.0.0.1"
+	}
+
 	yamuxConnectionSession, err := yamuxConn.Open()
 	if err != nil {
 		logrus.Error(err)
@@ -101,7 +108,7 @@ func HandlePacket(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Sessi
 	connectPacket := protocol.ConnectRequestPacket{
 		Net:       protonet,
 		Transport: prototransport,
-		Address:   endpointID.LocalAddress.String(),
+		Address:   targetIp,
 		Port:      endpointID.LocalPort,
 	}
 
