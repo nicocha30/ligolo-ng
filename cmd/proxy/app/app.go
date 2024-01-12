@@ -36,6 +36,21 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 	return nil
 }
 
+func AgentCheckIn() {
+	for {
+		for num, agent := range AgentList {
+			if agent.Session.IsClosed() {
+				logrus.Warnf("Agent %v: is offline. Deleting session %v", num, agent.Name)
+				AgentListMutex.Lock()
+				delete(AgentList, agent.Id)
+				AgentListMutex.Unlock()
+				App.SetDefaultPrompt()
+			}
+		}
+		time.Sleep(time.Second * 1)
+	}
+}
+
 func Run() {
 	// CurrentAgent points to the selected agent in the UI (when running session)
 	var CurrentAgentID int
@@ -43,6 +58,8 @@ func Run() {
 	AgentList = make(map[int]*controller.LigoloAgent)
 	// ListenerList contains all listener relays
 	ListenerList = make(map[int]controller.Listener)
+
+	go AgentCheckIn()
 
 	App.AddCommand(&grumble.Command{
 		Name:  "session",
