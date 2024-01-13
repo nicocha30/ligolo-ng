@@ -15,7 +15,7 @@ func main() {
 	var tlsConfig tls.Config
 	var ignoreCertificate = flag.Bool("ignore-cert", false, "ignore TLS certificate validation (dangerous), only for debug purposes")
 	var verbose = flag.Bool("v", false, "enable verbose mode")
-	var retry = flag.Bool("retry", false, "auto-retry on error")
+	var retry = flag.Int("retry", 0, "auto-retry on error with delay in sec. If 0 then no auto-retry")
 	var socksProxy = flag.String("socks", "", "socks5 proxy address (ip:port)")
 	var socksUser = flag.String("socks-user", "", "socks5 username")
 	var socksPass = flag.String("socks-pass", "", "socks5 password")
@@ -58,9 +58,9 @@ func main() {
 			err = connect(conn, &tlsConfig)
 		}
 		logrus.Errorf("Connection error: %v", err)
-		if *retry {
-			logrus.Info("Retrying in 5 seconds.")
-			time.Sleep(5 * time.Second)
+		if *retry > 0 {
+			logrus.Infof("Retrying in %d seconds.", *retry)
+			time.Sleep(time.Duration(*retry) * time.Second)
 		} else {
 			logrus.Fatal(err)
 		}

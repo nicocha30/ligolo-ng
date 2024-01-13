@@ -51,6 +51,54 @@ func AgentCheckIn() {
 	}
 }
 
+func AutostartAgent(agent *controller.LigoloAgent, tunname string) error {
+
+	CurrentAgent := agent
+	logrus.Infof("Starting tunnel to %s", CurrentAgent.Name)
+	ligoloStack, err := proxy.NewLigoloTunnel(netstack.StackSettings{
+		//TunName:     c.Flags.String("tun"),
+		TunName:     tunname,
+		MaxInflight: 4096,
+	})
+	if err != nil {
+		logrus.Error("Unable to create tunnel, err:", err)
+		return nil
+	}
+	ifName, err := ligoloStack.GetStack().Interface().Name()
+	if err != nil {
+		logrus.Warn("unable to get interface name, err:", err)
+		//ifName = c.Flags.String("tun")
+		ifName = tunname
+	}
+	CurrentAgent.Interface = ifName
+	CurrentAgent.Running = true
+
+	ctx, cancelTunnel := context.WithCancel(context.Background())
+	go ligoloStack.HandleSession(CurrentAgent.Session, ctx)
+
+	for {
+		select {
+		case <-CurrentAgent.CloseChan: // User stopped
+			logrus.Infof("Closing tunnel to %s...", CurrentAgent.Name)
+			cancelTunnel()
+			return nil
+		case <-CurrentAgent.Session.CloseChan(): // Agent closed
+			logrus.Warnf("Lost connection with agent %s!", CurrentAgent.Name)
+			// Connection lost, we need to delete the Agent from the list
+			AgentListMutex.Lock()
+			delete(AgentList, CurrentAgent.Id)
+			AgentListMutex.Unlock()
+			if CurrentAgent.Id == CurrentAgent.Id {
+				App.SetDefaultPrompt()
+				CurrentAgent.Session = nil
+			}
+			cancelTunnel()
+			return nil
+		}
+	}
+	return nil
+}
+
 func Run() {
 	// CurrentAgent points to the selected agent in the UI (when running session)
 	var CurrentAgentID int
