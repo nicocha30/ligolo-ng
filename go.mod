@@ -15,7 +15,11 @@ require (
 	golang.zx2c4.com/wireguard v0.0.0-20220703234212-c31a7b1ab478
 )
 
-require github.com/nicocha30/gvisor-ligolo v0.0.0-20230726075806-989fa2c0a413
+require (
+	github.com/nicocha30/gvisor-ligolo v0.0.0-20230726075806-989fa2c0a413
+	golang.org/x/sys v0.15.0
+	nhooyr.io/websocket v1.8.10
+)
 
 require (
 	github.com/desertbit/closer/v3 v3.1.3 // indirect
@@ -34,7 +38,6 @@ require (
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/term v0.15.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.0.0-20220609170525-579cf78fd858 // indirect

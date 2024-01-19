@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -12,6 +13,8 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"nhooyr.io/websocket"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,12 +37,31 @@ type ControllerConfig struct {
 	DomainWhitelist []string
 }
 
+var wsconn net.Conn
+
 func New(config ControllerConfig) Controller {
 	return Controller{Network: "tcp", Connection: make(chan net.Conn, 1024), ControllerConfig: config, startchan: make(chan interface{}), certificateMap: make(map[string]*tls.Certificate)}
 }
 
 func (c *Controller) WaitForReady() {
 	<-c.startchan
+	return
+}
+
+type myHttpServer struct {
+	// logf controls where logs are sent.
+	logf func(f string, v ...interface{})
+}
+
+func (s myHttpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+
+	c, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	netctx, _ := context.WithTimeout(context.Background(), time.Hour*999999)
+	wsconn = websocket.NetConn(netctx, c, websocket.MessageBinary)
 	return
 }
 
@@ -126,19 +148,84 @@ func (c *Controller) ListenAndServe() {
 		logrus.Fatal("No valid TLS configuration found, please use -certfile/-keyfile, -autocert or -selfcert options")
 	}
 
-	listener, err := tls.Listen(c.Network, c.Address, &tlsConfig)
-	if err != nil {
-		logrus.Fatal(err)
-	}
-	defer listener.Close()
-	close(c.startchan) // Controller is listening.
-	logrus.Infof("Listening on %s", c.Address)
-	for {
-		conn, err := listener.Accept()
+	if strings.Contains(c.Address, "https://") {
+		//websocket https listen
+		listener, err := tls.Listen(c.Network, strings.Replace(c.Address, "https://", "", 1), &tlsConfig)
 		if err != nil {
-			logrus.Error(err)
-			continue
+			logrus.Fatal(err)
 		}
-		c.Connection <- conn
+		defer listener.Close()
+		close(c.startchan) // Controller is listening.
+		logrus.Infof("Listening websocket on %s", c.Address)
+
+		s := &http.Server{
+			Handler: myHttpServer{},
+		}
+		for {
+			go func() {
+				err = s.Serve(listener)
+			}()
+			if err != nil {
+				logrus.Error(err)
+			}
+			//manual waiting until handler got connection and set wsconn variable
+			for {
+				if wsconn != nil {
+					logrus.Infof("Got websocket connection %s", wsconn.RemoteAddr())
+					c.Connection <- wsconn
+					wsconn = nil
+					break
+				}
+				time.Sleep(time.Millisecond * 500)
+			}
+		}
+	} else if strings.Contains(c.Address, "http://") {
+		//websocket http listen
+		listener, err := net.Listen(c.Network, strings.Replace(c.Address, "http://", "", 1))
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		defer listener.Close()
+		close(c.startchan) // Controller is listening.
+		logrus.Infof("Listening websocket on %s", c.Address)
+
+		s := &http.Server{
+			Handler: myHttpServer{},
+		}
+		for {
+			go func() {
+				err = s.Serve(listener)
+			}()
+			if err != nil {
+				logrus.Error(err)
+			}
+			//manual waiting until handler got connection and set wsconn variable
+			for {
+				if wsconn != nil {
+					logrus.Infof("Got websocket connection %s", wsconn.RemoteAddr())
+					c.Connection <- wsconn
+					wsconn = nil
+					break
+				}
+				time.Sleep(time.Millisecond * 500)
+			}
+		}
+	} else {
+		//direct listen
+		listener, err := tls.Listen(c.Network, c.Address, &tlsConfig)
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		defer listener.Close()
+		close(c.startchan) // Controller is listening.
+		logrus.Infof("Listening on %s", c.Address)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				logrus.Error(err)
+				continue
+			}
+			c.Connection <- conn
+		}
 	}
 }
