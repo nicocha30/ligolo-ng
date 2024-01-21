@@ -24,8 +24,9 @@ func main() {
 	var socksProxy = flag.String("proxy", "", "proxy URL address (http://admin:secret@127.0.0.1:8080)"+
 		" or socks://admin:secret@127.0.0.1:8080")
 	var serverAddr = flag.String("connect", "", "the target (domain:port)")
+	var serverName = flag.String("sname", "", "SNI (server name in TLS)")
 	var userAgent = flag.String("ua", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
-		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36", "http User-Agent")
+		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36", "HTTP User-Agent")
 
 	flag.Parse()
 
@@ -62,6 +63,10 @@ func main() {
 			logrus.Fatal("Invalid connect address, please use host:port")
 		}
 		tlsConfig.ServerName = host
+	}
+
+	if *serverName != "" {
+		tlsConfig.ServerName = *serverName
 	}
 
 	if *ignoreCertificate {
