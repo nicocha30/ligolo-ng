@@ -2,13 +2,14 @@ package main
 
 import (
 	"flag"
+	"os"
+	"strings"
+
 	"github.com/desertbit/grumble"
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/cmd/proxy/app"
 	"github.com/nicocha30/ligolo-ng/pkg/controller"
 	"github.com/sirupsen/logrus"
-	"os"
-	"strings"
 )
 
 func main() {
@@ -48,7 +49,9 @@ func main() {
 	go proxyController.ListenAndServe()
 
 	// Wait for listener
-	proxyController.WaitForReady()
+	if err := proxyController.WaitForReady(); err != nil {
+		logrus.Fatal(err)
+	}
 
 	// Agent registration goroutine
 	go func() {

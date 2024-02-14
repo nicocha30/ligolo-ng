@@ -7,19 +7,21 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"github.com/sirupsen/logrus"
-	"golang.org/x/crypto/acme/autocert"
+	"errors"
 	"math/big"
 	"net"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 type Controller struct {
 	Network          string
 	Connection       chan net.Conn
-	startchan        chan interface{}
+	startchan        chan error
 	certificateMap   map[string]*tls.Certificate
 	certificateMutex sync.Mutex
 	ControllerConfig
@@ -35,12 +37,11 @@ type ControllerConfig struct {
 }
 
 func New(config ControllerConfig) Controller {
-	return Controller{Network: "tcp", Connection: make(chan net.Conn, 1024), ControllerConfig: config, startchan: make(chan interface{}), certificateMap: make(map[string]*tls.Certificate)}
+	return Controller{Network: "tcp", Connection: make(chan net.Conn, 1024), ControllerConfig: config, startchan: make(chan error), certificateMap: make(map[string]*tls.Certificate)}
 }
 
-func (c *Controller) WaitForReady() {
-	<-c.startchan
-	return
+func (c *Controller) WaitForReady() error {
+	return <-c.startchan
 }
 
 func (c *Controller) ListenAndServe() {
@@ -57,9 +58,18 @@ func (c *Controller) ListenAndServe() {
 			certManager.HostPolicy = autocert.HostWhitelist(c.DomainWhitelist...)
 		}
 		tlsConfig.GetCertificate = certManager.GetCertificate
+
+		// Check if port 80 is available
+		lis, err := net.Listen("tcp", ":http")
+		if err != nil {
+			c.startchan <- errors.New("Port 80 is not available, please make sure it's accessible for Let's Encrypt ACME challenge")
+			return
+		}
+		lis.Close()
+
 		go func() {
 			h := certManager.HTTPHandler(nil)
-			logrus.Fatal(http.ListenAndServe(":http", h))
+			http.ListenAndServe(":http", h)
 		}()
 	} else if c.EnableSelfcert {
 		logrus.Warning("Using automatically generated self-signed certificates (Not recommended)")
@@ -74,7 +84,7 @@ func (c *Controller) ListenAndServe() {
 			c.certificateMutex.Unlock()
 			priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			if err != nil {
-				logrus.Fatal(err)
+				return nil, err
 			}
 
 			serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
@@ -119,19 +129,23 @@ func (c *Controller) ListenAndServe() {
 	} else if c.Certfile != "" && c.Keyfile != "" {
 		cer, err := tls.LoadX509KeyPair(c.Certfile, c.Keyfile)
 		if err != nil {
-			logrus.WithFields(logrus.Fields{"certfile": c.Certfile, "keyfile": c.Keyfile}).Fatal("Could not load TLS certificate. Please make sure paths are correct or use -autocert or -selfcert options")
+			logrus.WithFields(logrus.Fields{"certfile": c.Certfile, "keyfile": c.Keyfile}).Error("Could not load TLS certificate. Please make sure paths are correct or use -autocert or -selfcert options")
+			c.startchan <- err
+			return
 		}
 		tlsConfig.Certificates = []tls.Certificate{cer}
 	} else {
-		logrus.Fatal("No valid TLS configuration found, please use -certfile/-keyfile, -autocert or -selfcert options")
+		c.startchan <- errors.New("No valid TLS configuration found, please use -certfile/-keyfile, -autocert or -selfcert options")
+		return
 	}
 
 	listener, err := tls.Listen(c.Network, c.Address, &tlsConfig)
 	if err != nil {
-		logrus.Fatal(err)
+		c.startchan <- err
+		return
 	}
 	defer listener.Close()
-	close(c.startchan) // Controller is listening.
+	c.startchan <- nil // Controller is listening.
 	logrus.Infof("Listening on %s", c.Address)
 	for {
 		conn, err := listener.Accept()

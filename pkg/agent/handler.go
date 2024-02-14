@@ -4,16 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/nicocha30/ligolo-ng/pkg/agent/neterror"
-	"github.com/nicocha30/ligolo-ng/pkg/agent/smartping"
-	"github.com/nicocha30/ligolo-ng/pkg/protocol"
-	"github.com/nicocha30/ligolo-ng/pkg/relay"
-	"github.com/sirupsen/logrus"
 	"net"
 	"os"
 	"os/user"
 	"syscall"
 	"time"
+
+	"github.com/nicocha30/ligolo-ng/pkg/agent/neterror"
+	"github.com/nicocha30/ligolo-ng/pkg/agent/smartping"
+	"github.com/nicocha30/ligolo-ng/pkg/protocol"
+	"github.com/nicocha30/ligolo-ng/pkg/relay"
+	"github.com/sirupsen/logrus"
 )
 
 var listenerConntrack map[int32]net.Conn
@@ -80,7 +81,8 @@ func NewUDPListener(network string, addr string) (UDPListener, error) {
 func HandleConn(conn net.Conn) {
 	decoder := protocol.NewDecoder(conn)
 	if err := decoder.Decode(); err != nil {
-		panic(err)
+		logrus.Error(err)
+		return
 	}
 
 	e := decoder.Envelope.Payload
@@ -127,7 +129,8 @@ func HandleConn(conn net.Conn) {
 			Type:    protocol.MessageConnectResponse,
 			Payload: connectPacket,
 		}); err != nil {
-			logrus.Fatal(err)
+			logrus.Error(err)
+			return
 		}
 		if connectPacket.Established {
 			relay.StartRelay(targetConn, conn)
@@ -142,7 +145,8 @@ func HandleConn(conn net.Conn) {
 			Type:    protocol.MessageHostPingResponse,
 			Payload: pingResponse,
 		}); err != nil {
-			logrus.Fatal(err)
+			logrus.Error(err)
+			return
 		}
 	case protocol.MessageInfoRequest:
 		var username string
@@ -173,7 +177,8 @@ func HandleConn(conn net.Conn) {
 			Type:    protocol.MessageInfoReply,
 			Payload: infoResponse,
 		}); err != nil {
-			logrus.Fatal(err)
+			logrus.Error(err)
+			return
 		}
 	case protocol.MessageListenerCloseRequest:
 		// Request to close a listener
@@ -325,7 +330,8 @@ func HandleConn(conn net.Conn) {
 			Type:    protocol.MessageListenerSockResponse,
 			Payload: sockResponse,
 		}); err != nil {
-			logrus.Fatal(err)
+			logrus.Error(err)
+			return
 		}
 
 		if sockResponse.Err {
