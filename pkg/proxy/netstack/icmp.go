@@ -3,6 +3,7 @@ package netstack
 import (
 	"bytes"
 	"errors"
+
 	"github.com/nicocha30/gvisor-ligolo/pkg/buffer"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/checksum"
@@ -48,7 +49,8 @@ func icmpResponder(s *NetStack) error {
 							continue
 						} else {
 							// This is bad.
-							panic(err)
+							logrus.Error(err)
+							return
 						}
 					}
 
@@ -171,7 +173,7 @@ func ProcessICMP(nstack *stack.Stack, pkt stack.PacketBufferPtr) {
 		replyPkt.TransportProtocolNumber = header.ICMPv4ProtocolNumber
 
 		if err := r.WriteHeaderIncludedPacket(replyPkt); err != nil {
-			panic(err)
+			logrus.Error(err)
 			return
 		}
 	}

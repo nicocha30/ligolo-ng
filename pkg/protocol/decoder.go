@@ -42,85 +42,85 @@ func (d *LigoloDecoder) Decode() error {
 	case MessageInfoRequest:
 		p := InfoRequestPacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageInfoReply:
 		p := InfoReplyPacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageConnectRequest:
 		p := ConnectRequestPacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageConnectResponse:
 		p := ConnectResponsePacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageHostPingRequest:
 		p := HostPingRequestPacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageHostPingResponse:
 		p := HostPingResponsePacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageListenerRequest:
 		p := ListenerRequestPacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageListenerResponse:
 		p := ListenerResponsePacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageListenerBindRequest:
 		p := ListenerBindPacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageListenerBindResponse:
 		p := ListenerBindReponse{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageListenerSockRequest:
 		p := ListenerSockRequestPacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageListenerSockResponse:
 		p := ListenerSockResponsePacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageListenerCloseRequest:
 		p := ListenerCloseRequestPacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	case MessageListenerCloseResponse:
 		p := ListenerCloseResponsePacket{}
 		if err := gobdecoder.Decode(&p); err != nil {
-			panic(err)
+			return err
 		}
 		d.Envelope.Payload = p
 	default:
