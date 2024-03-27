@@ -199,14 +199,14 @@ Idx     Mét         MTU          État                Nom
 Start the tunnel on the proxy:
 
 ```
-[Agent : nchatelain@nworkstation] » start_tunnel
+[Agent : nchatelain@nworkstation] » tunnel_start
 [Agent : nchatelain@nworkstation] » INFO[0690] Starting tunnel to nchatelain@nworkstation   
 ```
 
 You can also specify a custom tuntap interface using the ``--tun iface`` option:
 
 ```
-[Agent : nchatelain@nworkstation] » start_tunnel --tun mycustomtuntap
+[Agent : nchatelain@nworkstation] » tunnel_start --tun mycustomtuntap
 [Agent : nchatelain@nworkstation] » INFO[0690] Starting tunnel to nchatelain@nworkstation   
 ```
 
