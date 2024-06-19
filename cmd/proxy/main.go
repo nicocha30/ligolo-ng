@@ -8,14 +8,16 @@ import (
 	"github.com/desertbit/grumble"
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/cmd/proxy/app"
+	"github.com/nicocha30/ligolo-ng/pkg/common"
 	"github.com/nicocha30/ligolo-ng/pkg/controller"
 	"github.com/sirupsen/logrus"
 )
 
 func main() {
 	var allowDomains []string
+	var version = flag.Bool("version", false, "print version information and exit")
 	var verboseFlag = flag.Bool("v", false, "enable verbose mode")
-	var listenInterface = flag.String("laddr", "0.0.0.0:11601", "listening address ")
+	var listenInterface = flag.String("laddr", "0.0.0.0:11601", "listening address")
 	var enableAutocert = flag.Bool("autocert", false, "automatically request letsencrypt certificates, requires port 80 to be accessible")
 	var enableSelfcert = flag.Bool("selfcert", false, "dynamically generate self-signed certificates")
 	var certFile = flag.String("certfile", "certs/cert.pem", "TLS server certificate")
@@ -23,6 +25,11 @@ func main() {
 	var domainWhitelist = flag.String("allow-domains", "", "autocert authorised domains, if empty, allow all domains, multiple domains should be comma-separated.")
 
 	flag.Parse()
+
+	if *version {
+		common.PrintVersion()
+		return
+	}
 
 	if *verboseFlag {
 		logrus.SetLevel(logrus.DebugLevel)

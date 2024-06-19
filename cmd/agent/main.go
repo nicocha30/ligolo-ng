@@ -5,6 +5,7 @@ import (
 	"flag"
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/agent"
+	"github.com/nicocha30/ligolo-ng/pkg/common"
 	"github.com/sirupsen/logrus"
 	goproxy "golang.org/x/net/proxy"
 	"net"
@@ -14,6 +15,7 @@ import (
 func main() {
 	var tlsConfig tls.Config
 	var ignoreCertificate = flag.Bool("ignore-cert", false, "ignore TLS certificate validation (dangerous), only for debug purposes")
+	var version = flag.Bool("version", false, "print version information and exit")
 	var verbose = flag.Bool("v", false, "enable verbose mode")
 	var retry = flag.Bool("retry", false, "auto-retry on error")
 	var socksProxy = flag.String("socks", "", "socks5 proxy address (ip:port)")
@@ -24,6 +26,11 @@ func main() {
 	flag.Parse()
 
 	logrus.SetReportCaller(*verbose)
+
+	if *version {
+		common.PrintVersion()
+		return
+	}
 
 	if *verbose {
 		logrus.SetLevel(logrus.DebugLevel)
