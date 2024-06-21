@@ -106,6 +106,14 @@ $ sudo ip tuntap add user [your_username] mode tun ligolo
 $ sudo ip link set ligolo up
 ```
 
+> On **Ligolo-ng >= v0.6**, you can now use the `interface_create` command to create a new interface! No need to use ip tuntap!
+
+```
+ligolo-ng » interface_create --name "evil-cha"
+INFO[3185] Creating a new "evil-cha" interface...       
+INFO[3185] Interface created!
+```
+
 #### Windows
 
 You need to download the [Wintun](https://www.wintun.net/) driver (used by [WireGuard](https://www.wireguard.com/)) and place the `wintun.dll` in the same folder as Ligolo (make sure you use the right architecture).
@@ -117,6 +125,7 @@ Start the *proxy* server on your Command and Control (C2) server (default port 1
 ```shell
 $ ./proxy -h # Help options
 $ ./proxy -autocert # Automatically request LetsEncrypt certificates
+$ ./proxy -selfcert # Use self-signed certificates
 ```
 
 ### TLS Options
@@ -131,7 +140,7 @@ When using the `-autocert` option, the proxy will automatically request a certif
 
 If you want to use your own certificates for the proxy server, you can use the `-certfile` and `-keyfile` parameters.
 
-#### Automatic self-signed certificates (NOT RECOMMENDED)
+#### Automatic self-signed certificates
 
 The *proxy/relay* can automatically generate self-signed TLS certificates using the `-selfcert` option.
 
@@ -181,9 +190,17 @@ Display the network configuration of the agent using the `ifconfig` command:
 Add a route on the *proxy/relay* server to the *192.168.0.0/24* *agent* network.
 
 *Linux*:
+
+**Using the terminal:**
 ```shell
 $ sudo ip route add 192.168.0.0/24 dev ligolo
 ```
+**Or using the Ligolo-ng (>= 0.6) interface:**
+```
+ligolo-ng » interface_add_route --name evil-cha --route 192.168.2.0/24
+INFO[3206] Route created.                               
+```
+
 
 *Windows*:
 ```
@@ -196,7 +213,7 @@ Idx     Mét         MTU          État                Nom
 > route add 192.168.0.0 mask 255.255.255.0 0.0.0.0 if [THE INTERFACE IDX]
 ```
 
-Start the tunnel on the proxy:
+Start the tunnel on the proxy, using the default `ligolo` interface name:
 
 ```
 [Agent : nchatelain@nworkstation] » tunnel_start
@@ -260,8 +277,8 @@ INFO[1505] Listener closed.
 
 ### Access to agent's local ports (127.0.0.1)
 
-If you need to access the local ports of the currently connected agent, there's a "magic" IP hardcoded in Ligolo-ng: *240.0.0.1* ( This IP address is part of an unused IPv4 subnet).
-If you query this IP address, Ligolo-ng will automatically redirect traffic to the agent's local IP address (127.0.0.1).
+If you need to access the local ports of the currently connected agent, there's a "magic" CIDR hardcoded in Ligolo-ng: *240.0.0.0/4* (This is an unused IPv4 subnet).
+If you query an IP address on this subnet, Ligolo-ng will automatically redirect traffic to the agent's local IP address (127.0.0.1).
 
 Example:
 

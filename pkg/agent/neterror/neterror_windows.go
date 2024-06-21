@@ -1,10 +1,14 @@
 package neterror
 
-import "syscall"
+import (
+	"errors"
+	"syscall"
+)
 
 func HostResponded(err error) bool {
-	if se, ok := err.(syscall.Errno); ok {
-		return se == syscall.WSAECONNRESET || se == syscall.WSAECONNABORTED
+	var se syscall.Errno
+	if errors.As(err, &se) {
+		return errors.Is(se, syscall.WSAECONNRESET) || errors.Is(se, syscall.WSAECONNABORTED)
 	}
 	return false
 }

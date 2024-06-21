@@ -72,7 +72,7 @@ func (c *Controller) ListenAndServe() {
 			http.ListenAndServe(":http", h)
 		}()
 	} else if c.EnableSelfcert {
-		logrus.Warning("Using automatically generated self-signed certificates (Not recommended)")
+		logrus.Warning("Using automatically generated self-signed certificates")
 
 		tlsConfig.GetCertificate = func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			// Cache

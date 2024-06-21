@@ -3,12 +3,20 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/agent"
 	"github.com/sirupsen/logrus"
 	goproxy "golang.org/x/net/proxy"
 	"net"
+	"os"
 	"time"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 func main() {
@@ -20,6 +28,14 @@ func main() {
 	var socksUser = flag.String("socks-user", "", "socks5 username")
 	var socksPass = flag.String("socks-pass", "", "socks5 password")
 	var serverAddr = flag.String("connect", "", "the target (domain:port)")
+
+	flag.Usage = func() {
+		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
+		fmt.Println("Made in France with love by @Nicocha30!")
+		fmt.Println("https://github.com/nicocha30/ligolo-ng\n")
+		fmt.Printf("Usage of %s:\n", os.Args[0])
+		flag.PrintDefaults()
+	}
 
 	flag.Parse()
 

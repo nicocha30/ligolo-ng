@@ -14,6 +14,7 @@ import (
 	"github.com/nicocha30/ligolo-ng/pkg/relay"
 	"github.com/sirupsen/logrus"
 	"io"
+	"net"
 )
 
 // handleICMP process incoming ICMP packets and, depending on the target host status, respond a ICMP ECHO Reply
@@ -94,7 +95,13 @@ func HandlePacket(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Sessi
 	logrus.Debugf("Got packet source : %s - endpointID : %s:%d", endpointID.RemoteAddress, endpointID.LocalAddress, endpointID.LocalPort)
 
 	targetIp := endpointID.LocalAddress.String()
-	if endpointID.LocalAddress.String() == "240.0.0.1" {
+
+	magicNet := net.IPNet{
+		IP:   net.IPv4(240, 0, 0, 0),
+		Mask: []byte{0xf0, 0x00, 0x00, 0x00},
+	}
+
+	if magicNet.Contains(net.ParseIP(targetIp)) {
 		logrus.Debug("MagicIP detected, redirecting to agent local machine")
 		// Magic IP detected
 		targetIp = "127.0.0.1"
