@@ -97,7 +97,7 @@ func (l *LigoloListener) relayTCP() error {
 		if err := ligoloProtocol.Decode(); err != nil {
 			if err == io.EOF {
 				// Listener closed.
-				return err
+				return nil
 			}
 			return err
 		}

@@ -399,7 +399,9 @@ func Run() {
 						}
 						return
 					}
+
 					logrus.WithFields(logrus.Fields{"listener": listener.String()}).Warning("Listener ended without error.")
+					return
 				}
 			}()
 
