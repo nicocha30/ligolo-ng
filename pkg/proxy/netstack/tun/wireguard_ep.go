@@ -58,6 +58,10 @@ func (m *RWEndpoint) dispatchLoop() {
 		if err != nil {
 			break
 		}
+		if n > int(m.mtu) {
+			// Not sure why it happens, discard packet - https://github.com/nicocha30/ligolo-ng/issues/54
+			continue
+		}
 
 		if !m.IsAttached() {
 			continue
