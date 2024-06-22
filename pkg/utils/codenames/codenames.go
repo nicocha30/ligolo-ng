@@ -41,7 +41,7 @@ func DefaultRNG() (*rand.Rand, error) {
 // then zero to generate and additional token and create
 // even more entropy.
 func Generate(rng *rand.Rand, tokenLength int) string {
-	res := fmt.Sprintf("%s-%s", randomAdjective(rng), randomNoun(rng))
+	res := fmt.Sprintf("%s%s", randomAdjective(rng), randomNoun(rng))
 	if tokenLength > 0 {
 		res = fmt.Sprintf("%s-%s", res, randomToken(rng, tokenLength))
 	}

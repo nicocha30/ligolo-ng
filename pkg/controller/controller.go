@@ -1,35 +1,29 @@
 package controller
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"errors"
-	"math/big"
-	"net"
-	"net/http"
-	"sync"
-	"time"
-
+	"github.com/nicocha30/ligolo-ng/pkg/utils/selfcert"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/acme/autocert"
+	"net"
+	"net/http"
 )
 
 type Controller struct {
-	Network          string
-	Connection       chan net.Conn
-	startchan        chan error
-	certificateMap   map[string]*tls.Certificate
-	certificateMutex sync.Mutex
+	Network       string
+	Connection    chan net.Conn
+	startchan     chan error
+	SelfCertCache autocert.DirCache
+	SelfCert      *tls.Certificate
 	ControllerConfig
 }
 
 type ControllerConfig struct {
 	EnableAutocert  bool
 	EnableSelfcert  bool
+	SelfcertDomain  string
 	Address         string
 	Certfile        string
 	Keyfile         string
@@ -37,7 +31,7 @@ type ControllerConfig struct {
 }
 
 func New(config ControllerConfig) Controller {
-	return Controller{Network: "tcp", Connection: make(chan net.Conn, 1024), ControllerConfig: config, startchan: make(chan error), certificateMap: make(map[string]*tls.Certificate)}
+	return Controller{Network: "tcp", Connection: make(chan net.Conn, 1024), ControllerConfig: config, startchan: make(chan error), SelfCertCache: "ligolo-selfcerts"}
 }
 
 func (c *Controller) WaitForReady() error {
@@ -72,60 +66,18 @@ func (c *Controller) ListenAndServe() {
 			http.ListenAndServe(":http", h)
 		}()
 	} else if c.EnableSelfcert {
-		logrus.Warning("Using automatically generated self-signed certificates")
-
-		tlsConfig.GetCertificate = func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			// Cache
-			c.certificateMutex.Lock()
-			if cert, ok := c.certificateMap[info.ServerName]; ok {
-				c.certificateMutex.Unlock()
-				return cert, nil
-			}
-			c.certificateMutex.Unlock()
-			priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-			if err != nil {
-				return nil, err
-			}
-
-			serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-			serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-			if err != nil {
-				return nil, err
-			}
-
-			template := x509.Certificate{
-				SerialNumber: serialNumber,
-				Subject: pkix.Name{
-					Organization: []string{info.ServerName},
-				},
-				NotBefore: time.Now(),
-				NotAfter:  time.Now().Add(time.Hour * 24 * 365),
-
-				KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-				ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-				BasicConstraintsValid: true,
-			}
-
-			if info.ServerName != "" {
-				template.DNSNames = []string{info.ServerName}
-			}
-
-			derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
-
-			if err != nil {
-				return nil, err
-			}
-			finalCert := &tls.Certificate{
-				Certificate: [][]byte{derBytes},
-				PrivateKey:  priv,
-			}
-			// Cache!
-			c.certificateMutex.Lock()
-			c.certificateMap[info.ServerName] = finalCert
-			c.certificateMutex.Unlock()
-			return finalCert, nil
-
+		logrus.Warning("Using self-signed certificates")
+		selfcrt := selfcert.NewSelfCert(&c.SelfCertCache)
+		crt, err := selfcrt.GetCertificate(c.SelfcertDomain)
+		if err != nil {
+			logrus.Fatal(err)
 		}
+		logrus.Warnf("TLS Certificate fingerprint for %s is: %X\n", c.SelfcertDomain, sha256.Sum256(crt.Certificate[0]))
+		c.SelfCert = crt
+		tlsConfig.GetCertificate = func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return crt, nil
+		}
+
 	} else if c.Certfile != "" && c.Keyfile != "" {
 		cer, err := tls.LoadX509KeyPair(c.Certfile, c.Keyfile)
 		if err != nil {

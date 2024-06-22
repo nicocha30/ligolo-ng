@@ -28,6 +28,7 @@ func main() {
 	var certFile = flag.String("certfile", "certs/cert.pem", "TLS server certificate")
 	var keyFile = flag.String("keyfile", "certs/key.pem", "TLS server key")
 	var domainWhitelist = flag.String("allow-domains", "", "autocert authorised domains, if empty, allow all domains, multiple domains should be comma-separated.")
+	var selfcertDomain = flag.String("selfcert-domain", "ligolo", "The selfcert TLS domain to use")
 	var versionFlag = flag.Bool("version", false, "show the current version")
 
 	flag.Usage = func() {
@@ -66,6 +67,10 @@ func main() {
 		a.Printf("  Version: %s\n\n", version)
 	})
 
+	if *enableSelfcert && *selfcertDomain == "ligolo" {
+		logrus.Warning("Using default selfcert domain 'ligolo', beware of CTI, SOC and IoC!")
+	}
+
 	app.Run()
 
 	proxyController := controller.New(controller.ControllerConfig{
@@ -75,7 +80,9 @@ func main() {
 		Certfile:        *certFile,
 		Keyfile:         *keyFile,
 		DomainWhitelist: allowDomains,
+		SelfcertDomain:  *selfcertDomain,
 	})
+	app.ProxyController = &proxyController
 
 	go proxyController.ListenAndServe()
 
@@ -91,7 +98,8 @@ func main() {
 
 			yamuxConn, err := yamux.Client(remoteConn, nil)
 			if err != nil {
-				panic(err)
+				logrus.Errorf("could not create yamux client, error: %v", err)
+				continue
 			}
 
 			agent, err := controller.NewAgent(yamuxConn)
@@ -105,6 +113,21 @@ func main() {
 			if err := app.RegisterAgent(agent); err != nil {
 				logrus.Errorf("could not register agent: %s", err.Error())
 			}
+
+			go func() {
+				// Check agent status
+				for {
+					select {
+					case <-agent.Session.CloseChan(): // Agent closed
+						logrus.Warnf("Lost ligolo-ng connection with agent %s!", agent.Name)
+						if err := app.UnregisterAgent(agent); err != nil {
+							logrus.Errorf("could not unregister agent: %s", err.Error())
+						}
+						return
+					}
+				}
+			}()
+
 		}
 	}()
 

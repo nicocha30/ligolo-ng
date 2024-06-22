@@ -31,10 +31,11 @@ You use Ligolo-ng for your penetration tests? Did it help you pass a certificati
   - [TLS Options](#tls-options)
     - [Using Let's Encrypt Autocert](#using-lets-encrypt-autocert)
     - [Using your own TLS certificates](#using-your-own-tls-certificates)
-    - [Automatic self-signed certificates (NOT RECOMMENDED)](#automatic-self-signed-certificates-not-recommended)
+    - [Automatic self-signed certificates](#automatic-self-signed-certificates)
   - [Using Ligolo-ng](#using-ligolo-ng)
   - [Agent Binding/Listening](#agent-bindinglistening)
   - [Access to agent's local ports (127.0.0.1)](#access-to-agents-local-ports-127001)
+  - [Agent as server (Bind)](#agent-as-server-bind)
 - [Demo](#demo)
 - [Does it require Administrator/root access ?](#does-it-require-administratorroot-access-)
 - [Supported protocols/packets](#supported-protocolspackets)
@@ -61,6 +62,7 @@ tunnels from a reverse TCP/TLS connection using a **tun interface** (without the
 - Socket listening/binding on the *agent*
 - Multiple platforms supported for the *agent*
 - Can handle multiple tunnels
+- Reverse/Bind Connection
 
 ## How is this different from Ligolo/Chisel/Meterpreter... ?
 
@@ -144,7 +146,27 @@ If you want to use your own certificates for the proxy server, you can use the `
 
 The *proxy/relay* can automatically generate self-signed TLS certificates using the `-selfcert` option.
 
-The `-ignore-cert` option needs to be used with the *agent*.
+***Validating self-signed certificates fingerprints (recommended)***
+
+When running selfcert, you can run the `certificate_fingerprint` command to print the currently used certificate fingerprint.
+
+```
+ligolo-ng » certificate_fingerprint 
+INFO[0203] TLS Certificate fingerprint for ligolo is: D005527D2683A8F2DB73022FBF23188E064493CFA17D6FCF257E14F4B692E0FC 
+```
+
+On the agent, you can then connect using the fingerprint provided by the Ligolo-ng proxy.
+
+```
+ligolo-agent -connect 127.0.0.1:11601 -v -accept-fingerprint D005527D2683A8F2DB73022FBF23188E064493CFA17D6FCF257E14F4B692E0FC                                               nchatelain@nworkstation
+INFO[0000] Connection established                        addr="127.0.0.1:11601"
+```
+
+> By default, the "ligolo" domain name is used for TLS Certificate generation. You can change the domain by using the -selfcert-domain [domain] option at startup.
+
+***Ignoring all certificate verification (for lab/debugging)***
+
+To ignore all security mechanisms, the `-ignore-cert` option can be used with the *agent*.
 
 > Beware of man-in-the-middle attacks! This option should only be used in a test environment or for debugging purposes.
 ### Using Ligolo-ng
@@ -195,7 +217,7 @@ Add a route on the *proxy/relay* server to the *192.168.0.0/24* *agent* network.
 ```shell
 $ sudo ip route add 192.168.0.0/24 dev ligolo
 ```
-**Or using the Ligolo-ng (>= 0.6) interface:**
+**Or using the Ligolo-ng (>= 0.6) cli:**
 ```
 ligolo-ng » interface_add_route --name evil-cha --route 192.168.2.0/24
 INFO[3206] Route created.                               
@@ -296,6 +318,31 @@ Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
 
 Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
 Nmap done: 1 IP address (1 host up) scanned in 7.16 seconds
+```
+
+### Agent as server (Bind)
+
+The Ligolo-ng agent can operate using a bind connection (i.e. acting as a server).
+
+Instead of using the `--connect [ip:port]` argument, you can use `--bind [ip:port]` so the agent start listening to connections.
+
+After that, the proxy can connect to the agent using the `connect_agent` command.
+
+In a terminal:
+```
+» ligolo-agent -bind 127.0.0.1:4444                                                                                                                                                                   
+WARN[0000] TLS Certificate fingerprint is: 05518ABE4F0D3B137A2365E0DE52A01FE052EE4C5A2FD12D8E2DD93AED1DD04B 
+INFO[0000] Listening on 127.0.0.1:4444...               
+INFO[0005] Got connection from: 127.0.0.1:53908         
+INFO[0005] Connection established                        addr="127.0.0.1:53908"
+```
+
+In ligolo-ng proxy:
+
+```
+ligolo-ng » connect_agent --ip 127.0.0.1:4444
+? TLS Certificate Fingerprint is: 05518ABE4F0D3B137A2365E0DE52A01FE052EE4C5A2FD12D8E2DD93AED1DD04B, connect? Yes
+INFO[0021] Agent connected.                              name=nchatelain@nworkstation remote="127.0.0.1:4444"
 ```
 
 ## Demo

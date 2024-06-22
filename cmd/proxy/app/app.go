@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/desertbit/grumble"
+	"github.com/hashicorp/yamux"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/nicocha30/ligolo-ng/pkg/controller"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy"
@@ -22,6 +25,7 @@ var AgentList map[int]*controller.LigoloAgent
 var AgentListMutex sync.Mutex
 var ListenerList map[int]controller.Listener
 var ListenerListMutex sync.Mutex
+var ProxyController *controller.Controller
 
 var (
 	ErrInvalidAgent   = errors.New("please, select an agent using the session command")
@@ -32,6 +36,13 @@ var (
 func RegisterAgent(agent *controller.LigoloAgent) error {
 	AgentListMutex.Lock()
 	AgentList[agent.Id] = agent
+	AgentListMutex.Unlock()
+	return nil
+}
+
+func UnregisterAgent(agent *controller.LigoloAgent) error {
+	AgentListMutex.Lock()
+	delete(AgentList, agent.Id)
 	AgentListMutex.Unlock()
 	return nil
 }
@@ -82,6 +93,72 @@ func Run() {
 
 			c.App.SetPrompt(fmt.Sprintf("[Agent : %s] » ", AgentList[CurrentAgentID].Name))
 
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
+		Name:  "certificate_fingerprint",
+		Help:  "Show the current selfcert fingerprint",
+		Usage: "certificate_fingerprint",
+
+		Run: func(c *grumble.Context) error {
+			selfcrt := ProxyController.SelfCert
+			if selfcrt == nil {
+				return errors.New("certificate is nil")
+			}
+			logrus.Printf("TLS Certificate fingerprint for %s is: %X\n", ProxyController.SelfcertDomain, sha256.Sum256(selfcrt.Certificate[0]))
+
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
+		Name:  "connect_agent",
+		Help:  "Attempt to connect to a bind agent",
+		Usage: "connect_agent --ip [agentip]",
+		Flags: func(f *grumble.Flags) {
+			f.StringL("ip", "", "The agent ip:port")
+			f.BoolL("ignore-cert", false, "Ignore TLS certificate verification")
+		},
+		Run: func(c *grumble.Context) error {
+			tlsConfig := &tls.Config{}
+			tlsConfig.InsecureSkipVerify = true
+
+			remoteConn, err := tls.Dial("tcp", c.Flags.String("ip"), tlsConfig)
+			if err != nil {
+				return err
+			}
+			if !c.Flags.Bool("ignore-cert") {
+				cert := remoteConn.ConnectionState().PeerCertificates[0].Raw
+				shaSum := sha256.Sum256(cert)
+				confirmTLS := false
+				prompt := &survey.Confirm{
+					Message: fmt.Sprintf("TLS Certificate Fingerprint is: %X, connect?", shaSum),
+				}
+				survey.AskOne(prompt, &confirmTLS)
+				if !confirmTLS {
+					remoteConn.Close()
+					return errors.New("connection aborted (user did not validate TLS cert)")
+				}
+			}
+
+			yamuxConn, err := yamux.Client(remoteConn, nil)
+			if err != nil {
+				return err
+			}
+
+			agent, err := controller.NewAgent(yamuxConn)
+			if err != nil {
+				logrus.Errorf("could not register agent, error: %v", err)
+				return err
+			}
+
+			logrus.WithFields(logrus.Fields{"remote": remoteConn.RemoteAddr(), "name": agent.Name}).Info("Agent connected.")
+
+			if err := RegisterAgent(agent); err != nil {
+				logrus.Errorf("could not register agent: %s", err.Error())
+			}
 			return nil
 		},
 	})
