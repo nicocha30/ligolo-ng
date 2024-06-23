@@ -33,6 +33,9 @@ You use Ligolo-ng for your penetration tests? Did it help you pass a certificati
     - [Using your own TLS certificates](#using-your-own-tls-certificates)
     - [Automatic self-signed certificates](#automatic-self-signed-certificates)
   - [Using Ligolo-ng](#using-ligolo-ng)
+    - [Start the agent](#start-the-agent)
+    - [Start the tunneling](#start-the-tunneling)
+    - [Setup routing](#setup-routing)
   - [Agent Binding/Listening](#agent-bindinglistening)
   - [Access to agent's local ports (127.0.0.1)](#access-to-agents-local-ports-127001)
   - [Agent as server (Bind)](#agent-as-server-bind)
@@ -171,6 +174,7 @@ To ignore all security mechanisms, the `-ignore-cert` option can be used with th
 > Beware of man-in-the-middle attacks! This option should only be used in a test environment or for debugging purposes.
 ### Using Ligolo-ng
 
+#### Start the agent
 
 Start the *agent* on your target (victim) computer (no privileges are required!):
 
@@ -193,7 +197,19 @@ ligolo-ng » session
 ? Specify a session : 1 - nchatelain@nworkstation - XX.XX.XX.XX:38000
 ```
 
-Display the network configuration of the agent using the `ifconfig` command:
+#### Start the tunneling
+
+Start the tunnel on the proxy, using the `evil-cha` interface name.
+
+```
+[Agent : nchatelain@nworkstation] » tunnel_start --tun evil-cha
+[Agent : nchatelain@nworkstation] » INFO[0690] Starting tunnel to nchatelain@nworkstation   
+```
+> On macOS, you need to specify a utun[0-9] device, like utun4.
+
+#### Setup routing
+
+First, display the network configuration of the agent using the `ifconfig` command:
 
 ```
 [Agent : nchatelain@nworkstation] » ifconfig 
@@ -209,22 +225,21 @@ Display the network configuration of the agent using the `ifconfig` command:
 └──────────────┴──────────────────────────────┘
 ```
 
-Add a route on the *proxy/relay* server to the *192.168.0.0/24* *agent* network.
+Then setup routes accordingly.
 
-*Linux*:
+**Linux**:
 
-**Using the terminal:**
+*Using the terminal:*
 ```shell
 $ sudo ip route add 192.168.0.0/24 dev ligolo
 ```
-**Or using the Ligolo-ng (>= 0.6) cli:**
+*Or using the Ligolo-ng (>= 0.6) cli:*
 ```
 ligolo-ng » interface_add_route --name evil-cha --route 192.168.2.0/24
 INFO[3206] Route created.                               
 ```
 
-
-*Windows*:
+**Windows**:
 ```
 > netsh int ipv4 show interfaces
 
@@ -235,20 +250,12 @@ Idx     Mét         MTU          État                Nom
 > route add 192.168.0.0 mask 255.255.255.0 0.0.0.0 if [THE INTERFACE IDX]
 ```
 
-Start the tunnel on the proxy, using the default `ligolo` interface name:
+**macOS:**
 
 ```
-[Agent : nchatelain@nworkstation] » tunnel_start
-[Agent : nchatelain@nworkstation] » INFO[0690] Starting tunnel to nchatelain@nworkstation   
+$ sudo ifconfig utun4 alias [random_ip] 255.255.255.0
+$ sudo route add -net 192.168.2.0/24 interface utun4
 ```
-
-You can also specify a custom tuntap interface using the ``--tun iface`` option:
-
-```
-[Agent : nchatelain@nworkstation] » tunnel_start --tun mycustomtuntap
-[Agent : nchatelain@nworkstation] » INFO[0690] Starting tunnel to nchatelain@nworkstation   
-```
-
 
 You can now access the *192.168.0.0/24* *agent* network from the *proxy* server.
 

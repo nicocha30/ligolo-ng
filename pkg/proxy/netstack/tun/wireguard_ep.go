@@ -53,8 +53,8 @@ func (m *RWEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 func (m *RWEndpoint) dispatchLoop() {
 	for {
 		packet := make([]byte, m.mtu)
-
-		n, err := m.wgdev.Read(packet, 0)
+		// Complying with macOS bullshit - I bought a Mac Mini to solve this nonsense. @phocean you lied, it sucks
+		n, err := m.wgdev.Read(packet, offset)
 		if err != nil {
 			break
 		}
@@ -62,16 +62,15 @@ func (m *RWEndpoint) dispatchLoop() {
 			// Not sure why it happens, discard packet - https://github.com/nicocha30/ligolo-ng/issues/54
 			continue
 		}
-
 		if !m.IsAttached() {
 			continue
 		}
 
 		pkb := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			Payload: buffer.MakeWithData(packet[:n]),
+			Payload: buffer.MakeWithData(packet[offset : n+offset]),
 		})
 
-		switch header.IPVersion(packet) {
+		switch header.IPVersion(packet[offset:]) {
 		case header.IPv4Version:
 			m.dispatcher.DeliverNetworkPacket(header.IPv4ProtocolNumber, pkb)
 		case header.IPv6Version:
@@ -103,7 +102,10 @@ func (m *RWEndpoint) WritePacket(pkt stack.PacketBufferPtr) tcpip.Error {
 	pktBuf := pkt.ToBuffer()
 	buf.Merge(&pktBuf)
 
-	if _, err := m.wgdev.Write(buf.Flatten(), 0); err != nil {
+	// Complying with macOS bullshit
+	offsetBuf := make([]byte, offset)
+
+	if _, err := m.wgdev.Write(append(offsetBuf, buf.Flatten()...), offset); err != nil {
 		return &tcpip.ErrInvalidEndpointState{}
 	}
 	return nil
