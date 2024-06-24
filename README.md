@@ -354,9 +354,7 @@ INFO[0021] Agent connected.                              name=nchatelain@nworkst
 
 ## Demo
 
-
-https://user-images.githubusercontent.com/31402213/127328691-e063e3f2-dbd9-43c6-bd12-08065a6d260f.mp4
-
+[Ligolo-ng-demo.webm](https://github.com/nicocha30/ligolo-ng/assets/31402213/3070bb7c-0b0d-4c77-9181-cff74fb2f0ba)
 
 ## Does it require Administrator/root access ?
 
