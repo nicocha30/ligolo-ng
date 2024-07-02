@@ -254,7 +254,7 @@ Idx     Mét         MTU          État                Nom
 
 ```
 $ sudo ifconfig utun4 alias [random_ip] 255.255.255.0
-$ sudo route add -net 192.168.2.0/24 interface utun4
+$ sudo route add -net 192.168.2.0/24 -interface utun4
 ```
 
 You can now access the *192.168.0.0/24* *agent* network from the *proxy* server.
