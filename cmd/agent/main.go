@@ -35,6 +35,7 @@ func main() {
 	var socksPass = flag.String("socks-pass", "", "socks5 password")
 	var serverAddr = flag.String("connect", "", "connect to proxy (domain:port)")
 	var bindAddr = flag.String("bind", "", "bind to ip:port")
+	var versionFlag = flag.Bool("version", false, "show the current version")
 
 	flag.Usage = func() {
 		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
@@ -45,6 +46,11 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
+		return
+	}
 
 	logrus.SetReportCaller(*verbose)
 

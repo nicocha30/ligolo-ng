@@ -2,6 +2,8 @@ package smartping
 
 import (
 	"github.com/go-ping/ping"
+	"github.com/sirupsen/logrus"
+	"net"
 	"os/exec"
 	"runtime"
 	"time"
@@ -9,6 +11,17 @@ import (
 
 // TryResolve tries to discover if the remote host is up using ICMP
 func TryResolve(address string) bool {
+	// Always return true for localhost
+	magicNet := net.IPNet{
+		IP:   net.IPv4(240, 0, 0, 0),
+		Mask: []byte{0xf0, 0x00, 0x00, 0x00},
+	}
+
+	if magicNet.Contains(net.ParseIP(address)) {
+		logrus.Debug("MagicIP Ping detected, returning true")
+		// Magic IP detected
+		return true
+	}
 	methods := []func(string) (bool, error){
 		RawPinger,
 		CommandPinger,

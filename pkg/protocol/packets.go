@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"encoding/gob"
 	"net"
 )
 
@@ -157,25 +156,4 @@ type HostPingRequestPacket struct {
 // HostPingResponsePacket is sent by the agent to indicate the requested host status
 type HostPingResponsePacket struct {
 	Alive bool
-}
-
-func init() {
-	// grep -Po 'type .* struct {' pkg/protocol/packets.go | cut -d ' ' -f2 | awk '{ print "gob.Register("$0"{})" }'
-	gob.Register(Envelope{})
-	gob.Register(InfoRequestPacket{})
-	gob.Register(InfoReplyPacket{})
-	gob.Register(ListenerSockRequestPacket{})
-	gob.Register(ListenerSockResponsePacket{})
-	gob.Register(ListenerRequestPacket{})
-	gob.Register(ListenerResponsePacket{})
-	gob.Register(ListenerBindPacket{})
-	gob.Register(ListenerBindReponse{})
-	gob.Register(ListenerUDPPacket{})
-	gob.Register(ListenerCloseRequestPacket{})
-	gob.Register(ListenerCloseResponsePacket{})
-	gob.Register(NetInterface{})
-	gob.Register(ConnectRequestPacket{})
-	gob.Register(ConnectResponsePacket{})
-	gob.Register(HostPingRequestPacket{})
-	gob.Register(HostPingResponsePacket{})
 }
