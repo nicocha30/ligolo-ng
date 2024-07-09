@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"errors"
@@ -9,6 +10,9 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 	"net"
 	"net/http"
+	"nhooyr.io/websocket"
+	"strings"
+	"time"
 )
 
 type Controller struct {
@@ -30,8 +34,27 @@ type ControllerConfig struct {
 	DomainWhitelist []string
 }
 
+var wsconn net.Conn
+
 func New(config ControllerConfig) Controller {
 	return Controller{Network: "tcp", Connection: make(chan net.Conn, 1024), ControllerConfig: config, startchan: make(chan error), SelfCertCache: "ligolo-selfcerts"}
+}
+
+type myHttpServer struct {
+	// logf controls where logs are sent.
+	logf func(f string, v ...interface{})
+}
+
+func (s myHttpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+
+	c, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	netctx, _ := context.WithTimeout(context.Background(), time.Hour*999999)
+	wsconn = websocket.NetConn(netctx, c, websocket.MessageBinary)
+	return
 }
 
 func (c *Controller) WaitForReady() error {
@@ -91,20 +114,57 @@ func (c *Controller) ListenAndServe() {
 		return
 	}
 
-	listener, err := tls.Listen(c.Network, c.Address, &tlsConfig)
-	if err != nil {
-		c.startchan <- err
-		return
-	}
-	defer listener.Close()
-	c.startchan <- nil // Controller is listening.
-	logrus.Infof("Listening on %s", c.Address)
-	for {
-		conn, err := listener.Accept()
+	if strings.Contains(c.Address, "https://") {
+		//SSL websocket protocol
+		listener, err := tls.Listen(c.Network, strings.Replace(c.Address, "https://", "", 1), &tlsConfig)
 		if err != nil {
-			logrus.Error(err)
-			continue
+			logrus.Fatal(err)
 		}
-		c.Connection <- conn
+		defer listener.Close()
+		close(c.startchan) // Controller is listening.
+		logrus.Infof("Listening websocket on %s", c.Address)
+
+		s := &http.Server{
+			Handler: myHttpServer{},
+		}
+		for {
+			//start http handler in go routine
+			go func() {
+				err = s.Serve(listener)
+			}()
+			if err != nil {
+				logrus.Error(err)
+			}
+			//manual waiting until handler got connection and global variable wsconn is set by http handler
+			//this not so gracefully but effective ))
+			for {
+				if wsconn != nil {
+					logrus.Infof("Got websocket connection %s", wsconn.RemoteAddr())
+					c.Connection <- wsconn
+					wsconn = nil
+					break
+				}
+				//add some sleep to reduce CPU usage, because it is in loop
+				time.Sleep(time.Millisecond * 500)
+			}
+		}
+	} else {
+		//direct listen with legacy ligolo-ng protocol
+		listener, err := tls.Listen(c.Network, c.Address, &tlsConfig)
+		if err != nil {
+			c.startchan <- err
+			return
+		}
+		defer listener.Close()
+		c.startchan <- nil // Controller is listening.
+		logrus.Infof("Listening on %s", c.Address)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				logrus.Error(err)
+				continue
+			}
+			c.Connection <- conn
+		}
 	}
 }

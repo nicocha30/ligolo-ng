@@ -19,6 +19,7 @@ require (
 	github.com/nicocha30/gvisor-ligolo v0.0.0-20230726075806-989fa2c0a413
 	github.com/vishvananda/netlink v1.1.1-0.20211118161826-650dca95af54
 	golang.org/x/sys v0.21.0
+	nhooyr.io/websocket v1.8.11
 )
 
 require (
