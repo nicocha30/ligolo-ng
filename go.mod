@@ -16,6 +16,7 @@ require (
 )
 
 require (
+	github.com/google/uuid v1.3.0
 	github.com/nicocha30/gvisor-ligolo v0.0.0-20230726075806-989fa2c0a413
 	github.com/vishvananda/netlink v1.1.1-0.20211118161826-650dca95af54
 	golang.org/x/sys v0.21.0
@@ -29,7 +30,6 @@ require (
 	github.com/desertbit/readline v1.5.1 // indirect
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/google/btree v1.1.2 // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect

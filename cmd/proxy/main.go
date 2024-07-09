@@ -120,9 +120,6 @@ func main() {
 					select {
 					case <-agent.Session.CloseChan(): // Agent closed
 						logrus.Warnf("Lost ligolo-ng connection with agent %s!", agent.Name)
-						if err := app.UnregisterAgent(agent); err != nil {
-							logrus.Errorf("could not unregister agent: %s", err.Error())
-						}
 						return
 					}
 				}

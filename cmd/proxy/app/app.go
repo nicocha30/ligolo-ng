@@ -27,6 +27,12 @@ var ListenerList map[int]controller.Listener
 var ListenerListMutex sync.Mutex
 var ProxyController *controller.Controller
 
+// CurrentAgentID points to the selected agent in the UI (when running session)
+var CurrentAgentID int
+
+// Store AgentIDs
+var AgentCounter int
+
 var (
 	ErrInvalidAgent   = errors.New("please, select an agent using the session command")
 	ErrAlreadyRunning = errors.New("already running")
@@ -35,21 +41,76 @@ var (
 
 func RegisterAgent(agent *controller.LigoloAgent) error {
 	AgentListMutex.Lock()
-	AgentList[agent.Id] = agent
-	AgentListMutex.Unlock()
+	defer AgentListMutex.Unlock()
+
+	for _, registeredAgents := range AgentList {
+		if agent.SessionID == registeredAgents.SessionID {
+			logrus.Infof("Recovered an agent: %s", registeredAgents.Name)
+			registeredAgents.Session = agent.Session
+			if registeredAgents.Running {
+				go StartTunnel(registeredAgents, registeredAgents.Interface)
+			}
+			return nil
+		}
+	}
+	AgentCounter++
+	AgentList[AgentCounter] = agent
 	return nil
 }
 
 func UnregisterAgent(agent *controller.LigoloAgent) error {
-	AgentListMutex.Lock()
+	/*AgentListMutex.Lock()
 	delete(AgentList, agent.Id)
-	AgentListMutex.Unlock()
+	AgentListMutex.Unlock()*/
 	return nil
 }
 
+func StartTunnel(agent *controller.LigoloAgent, tunName string) {
+	logrus.Infof("Starting tunnel to %s", agent.Name)
+	ligoloStack, err := proxy.NewLigoloTunnel(netstack.StackSettings{
+		TunName:     tunName,
+		MaxInflight: 4096,
+	})
+	if err != nil {
+		logrus.Error("Unable to create tunnel, err:", err)
+		return
+	}
+	ifName, err := ligoloStack.GetStack().Interface().Name()
+	if err != nil {
+		logrus.Warn("unable to get interface name, err:", err)
+		ifName = tunName
+	}
+	agent.Interface = ifName
+	agent.Running = true
+
+	ctx, cancelTunnel := context.WithCancel(context.Background())
+	go ligoloStack.HandleSession(agent.Session, ctx)
+
+	for {
+		select {
+		case <-agent.CloseChan: // User stopped
+			logrus.Infof("Closing tunnel to %s...", agent.Name)
+			cancelTunnel()
+			return
+		case <-agent.Session.CloseChan(): // Agent closed
+			logrus.Warnf("Lost tunnel connection with agent %s!", agent.Name)
+			//agent.Running = false
+			//agent.Session = nil
+
+			if currentAgent, ok := AgentList[CurrentAgentID]; ok {
+				if currentAgent.SessionID == agent.SessionID {
+					App.SetDefaultPrompt()
+					agent.Session = nil
+				}
+			}
+
+			cancelTunnel()
+			return
+		}
+	}
+}
+
 func Run() {
-	// CurrentAgent points to the selected agent in the UI (when running session)
-	var CurrentAgentID int
 	// AgentList contains all the connected agents
 	AgentList = make(map[int]*controller.LigoloAgent)
 	// ListenerList contains all listener relays
@@ -61,7 +122,13 @@ func Run() {
 		Usage: "session",
 		Run: func(c *grumble.Context) error {
 			AgentListMutex.Lock()
-			if len(AgentList) == 0 {
+			sessionCount := 0
+			for _, agent := range AgentList {
+				if agent.Session != nil && !agent.Session.IsClosed() {
+					sessionCount += 1
+				}
+			}
+			if sessionCount == 0 {
 				AgentListMutex.Unlock()
 				return errors.New("no sessions available")
 			}
@@ -72,7 +139,9 @@ func Run() {
 				Options: func() (out []string) {
 					AgentListMutex.Lock()
 					for id, agent := range AgentList {
-						out = append(out, fmt.Sprintf("%d - %s", id, agent.String()))
+						if agent.Session != nil && !agent.Session.IsClosed() {
+							out = append(out, fmt.Sprintf("%d - %s", id, agent.String()))
+						}
 					}
 					AgentListMutex.Unlock()
 					return
@@ -194,48 +263,8 @@ func Run() {
 				}
 			}
 
-			go func() {
-				logrus.Infof("Starting tunnel to %s", CurrentAgent.Name)
-				ligoloStack, err := proxy.NewLigoloTunnel(netstack.StackSettings{
-					TunName:     c.Flags.String("tun"),
-					MaxInflight: 4096,
-				})
-				if err != nil {
-					logrus.Error("Unable to create tunnel, err:", err)
-					return
-				}
-				ifName, err := ligoloStack.GetStack().Interface().Name()
-				if err != nil {
-					logrus.Warn("unable to get interface name, err:", err)
-					ifName = c.Flags.String("tun")
-				}
-				CurrentAgent.Interface = ifName
-				CurrentAgent.Running = true
+			go StartTunnel(CurrentAgent, c.Flags.String("tun"))
 
-				ctx, cancelTunnel := context.WithCancel(context.Background())
-				go ligoloStack.HandleSession(CurrentAgent.Session, ctx)
-
-				for {
-					select {
-					case <-CurrentAgent.CloseChan: // User stopped
-						logrus.Infof("Closing tunnel to %s...", CurrentAgent.Name)
-						cancelTunnel()
-						return
-					case <-CurrentAgent.Session.CloseChan(): // Agent closed
-						logrus.Warnf("Lost connection with agent %s!", CurrentAgent.Name)
-						// Connection lost, we need to delete the Agent from the list
-						AgentListMutex.Lock()
-						delete(AgentList, CurrentAgent.Id)
-						AgentListMutex.Unlock()
-						if CurrentAgent.Id == CurrentAgent.Id {
-							App.SetDefaultPrompt()
-							CurrentAgent.Session = nil
-						}
-						cancelTunnel()
-						return
-					}
-				}
-			}()
 			return nil
 		},
 	})
@@ -252,10 +281,10 @@ func Run() {
 
 			AgentListMutex.Lock()
 
-			for _, agent := range AgentList {
+			for id, agent := range AgentList {
 
 				if agent.Running {
-					t.AppendRow(table.Row{agent.Id, agent.Name, agent.Interface})
+					t.AppendRow(table.Row{id, agent.Name, agent.Interface})
 				}
 			}
 			AgentListMutex.Unlock()

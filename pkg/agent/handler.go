@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"net"
 	"os"
 	"os/user"
@@ -21,10 +22,13 @@ var listenerConntrack map[int32]net.Conn
 var listenerMap map[int32]interface{}
 var connTrackID int32
 var listenerID int32
+var sessionID string
 
 func init() {
 	listenerConntrack = make(map[int32]net.Conn)
 	listenerMap = make(map[int32]interface{})
+	id := uuid.New()
+	sessionID = id.String()
 }
 
 // Listener is the base class implementing listener sockets for Ligolo
@@ -171,6 +175,7 @@ func HandleConn(conn net.Conn) {
 		infoResponse := protocol.InfoReplyPacket{
 			Name:       fmt.Sprintf("%s@%s", username, hostname),
 			Interfaces: protocol.NewNetInterfaces(netifaces),
+			SessionID:  sessionID,
 		}
 
 		if err := encoder.Encode(protocol.Envelope{

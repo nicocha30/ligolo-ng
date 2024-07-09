@@ -47,6 +47,7 @@ type InfoRequestPacket struct {
 type InfoReplyPacket struct {
 	Name       string
 	Interfaces []NetInterface
+	SessionID  string
 }
 
 // ListenerSockRequestPacket is used by the proxy when relaying a listener socket
