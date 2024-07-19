@@ -49,6 +49,11 @@ type InfoReplyPacket struct {
 	Interfaces []NetInterface
 }
 
+// Set by the proxy to terminate an agent
+type AgentCloseRequestPacket struct {
+	UnlinkSelf bool
+}
+
 // ListenerSockRequestPacket is used by the proxy when relaying a listener socket
 type ListenerSockRequestPacket struct {
 	SockID int32

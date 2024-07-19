@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack"
+	"github.com/nicocha30/ligolo-ng/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -55,4 +56,29 @@ func (t *LigoloTunnel) GetStack() *netstack.NetStack {
 
 func (t *LigoloTunnel) Close() {
 	t.nstack.Close()
+}
+
+func TerminateAgent(sess *yamux.Session, unlinkAgent bool) error {
+	// open yamux connection
+	yamuxconnectionSession, err := sess.Open()
+
+	if err != nil {
+		return err
+	}
+
+	ligoloProtocol := protocol.NewEncoderDecoder(yamuxconnectionSession)
+
+	// send close request
+	request := protocol.AgentCloseRequestPacket{UnlinkSelf: unlinkAgent}
+	err = ligoloProtocol.Encode(protocol.Envelope{
+			Type:    protocol.MessageClose,
+			Payload: request,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	// no response is sent from the agent
+	return nil
 }

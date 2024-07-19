@@ -164,6 +164,34 @@ func Run() {
 	})
 
 	App.AddCommand(&grumble.Command{
+		Name:      "terminate",
+		Help:      "Terminate currently selected running agent",
+		Usage:     "terminate",
+		HelpGroup: "Management",
+		Aliases:   []string{"die"},
+		Flags: func(f *grumble.Flags) {
+			f.BoolL("unlink", false, "Unlink agent executable file before terminating")
+		},
+		Run: func(c *grumble.Context) error {
+			if _, ok := AgentList[CurrentAgentID]; !ok {
+				return ErrInvalidAgent
+			}
+
+			currentAgent := AgentList[CurrentAgentID]
+
+			logrus.Infof("Terminating agent %s", currentAgent.Name)
+
+			err := proxy.TerminateAgent(currentAgent.Session, c.Flags.Bool("unlink"))
+
+			if err != nil {
+				return err
+			}
+
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
 		Name:      "tunnel_start",
 		Help:      "Start relaying connection to the current agent",
 		Usage:     "tunnel_start --tun ligolo",

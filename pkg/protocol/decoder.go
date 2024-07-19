@@ -123,6 +123,12 @@ func (d *LigoloDecoder) Decode() error {
 			return err
 		}
 		d.Envelope.Payload = p
+	case MessageClose:
+		p := AgentCloseRequestPacket{}
+		if err := gobdecoder.Decode(&p); err != nil{
+			return err
+		}
+		d.Envelope.Payload = p
 	default:
 		return errors.New("invalid message type")
 	}

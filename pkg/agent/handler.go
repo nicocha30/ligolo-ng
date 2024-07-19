@@ -342,7 +342,22 @@ func HandleConn(conn net.Conn) {
 		relay.StartRelay(netConn, conn)
 
 	case protocol.MessageClose:
-		os.Exit(0)
+		closeRequest := e.(protocol.AgentCloseRequestPacket)
 
+		if closeRequest.UnlinkSelf {
+			path, err := os.Executable()
+
+			if err != nil {
+				os.Exit(1)
+			}
+
+			err = os.Remove(path)
+
+			if err != nil {
+				os.Exit(1)
+			}
+		}
+
+		os.Exit(0)
 	}
 }
