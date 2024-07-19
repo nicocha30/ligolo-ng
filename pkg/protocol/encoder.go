@@ -25,13 +25,13 @@ func (e *LigoloEncoder) Encode(envelope Envelope) error {
 		return err
 	}
 
-	if err := binary.Write(e.writer, binary.LittleEndian, envelope.Type); err != nil {
+	if err := binary.Write(e.writer, binary.BigEndian, envelope.Type); err != nil {
 		return err
 	}
 	if envelope.Size == 0 {
 		envelope.Size = int32(payload.Len())
 	}
-	if err := binary.Write(e.writer, binary.LittleEndian, envelope.Size); err != nil {
+	if err := binary.Write(e.writer, binary.BigEndian, envelope.Size); err != nil {
 		return err
 	}
 	_, err := e.writer.Write(payload.Bytes())

@@ -21,11 +21,11 @@ func NewDecoder(reader io.Reader) LigoloDecoder {
 
 // Decode read content from the reader and fill the Envelope
 func (d *LigoloDecoder) Decode() error {
-	if err := binary.Read(d.reader, binary.LittleEndian, &d.Envelope.Type); err != nil {
+	if err := binary.Read(d.reader, binary.BigEndian, &d.Envelope.Type); err != nil {
 		return err
 	}
 
-	if err := binary.Read(d.reader, binary.LittleEndian, &d.Envelope.Size); err != nil {
+	if err := binary.Read(d.reader, binary.BigEndian, &d.Envelope.Size); err != nil {
 		return err
 	}
 
