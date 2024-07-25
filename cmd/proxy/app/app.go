@@ -187,6 +187,8 @@ func Run() {
 				return err
 			}
 
+			c.App.SetDefaultPrompt()
+
 			return nil
 		},
 	})
