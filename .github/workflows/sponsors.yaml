@@ -16,3 +16,9 @@ jobs:
           template: '<a href="https://github.com/{{ login }}"><img src="https://github.com/{{ login }}.png" width="50px" alt="{{ login }}" /></a>&nbsp;&nbsp;'
           token: ${{ secrets.PAT }}
           file: 'README.md'
+      
+      - name: Deploy to GitHub Pages 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: master
+          folder: '.'
