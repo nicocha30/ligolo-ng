@@ -22,7 +22,7 @@ var (
 func main() {
 	var allowDomains []string
 	var verboseFlag = flag.Bool("v", false, "enable verbose mode")
-	var listenInterface = flag.String("laddr", "0.0.0.0:11601", "listening address ")
+	var listenInterface = flag.String("laddr", "0.0.0.0:11601", "listening address (prefix with https:// for websocket)")
 	var enableAutocert = flag.Bool("autocert", false, "automatically request letsencrypt certificates, requires port 80 to be accessible")
 	var enableSelfcert = flag.Bool("selfcert", false, "dynamically generate self-signed certificates")
 	var certFile = flag.String("certfile", "certs/cert.pem", "TLS server certificate")

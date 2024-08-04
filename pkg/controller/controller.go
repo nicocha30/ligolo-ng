@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 	"net"
 	"net/http"
+	"nhooyr.io/websocket"
+	"strings"
 )
 
 type Controller struct {
@@ -91,20 +94,48 @@ func (c *Controller) ListenAndServe() {
 		return
 	}
 
-	listener, err := tls.Listen(c.Network, c.Address, &tlsConfig)
-	if err != nil {
-		c.startchan <- err
-		return
-	}
-	defer listener.Close()
-	c.startchan <- nil // Controller is listening.
-	logrus.Infof("Listening on %s", c.Address)
-	for {
-		conn, err := listener.Accept()
+	if strings.HasPrefix(c.Address, "https://") {
+		//SSL websocket protocol
+		listener, err := tls.Listen(c.Network, strings.Replace(c.Address, "https://", "", 1), &tlsConfig)
 		if err != nil {
-			logrus.Error(err)
-			continue
+			c.startchan <- err
+			return
 		}
-		c.Connection <- conn
+		defer listener.Close()
+
+		c.startchan <- nil
+		logrus.Infof("Listening websocket on %s", c.Address)
+
+		s := &http.Server{
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ws, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					logrus.Error(err)
+					return
+				}
+				netctx := context.Background()
+
+				c.Connection <- websocket.NetConn(netctx, ws, websocket.MessageBinary)
+			}),
+		}
+		err = s.Serve(listener)
+	} else {
+		//direct listen with legacy ligolo-ng protocol
+		listener, err := tls.Listen(c.Network, c.Address, &tlsConfig)
+		if err != nil {
+			c.startchan <- err
+			return
+		}
+		defer listener.Close()
+		c.startchan <- nil // Controller is listening.
+		logrus.Infof("Listening on %s", c.Address)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				logrus.Error(err)
+				continue
+			}
+			c.Connection <- conn
+		}
 	}
 }
