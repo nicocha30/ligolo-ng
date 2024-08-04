@@ -37,13 +37,10 @@ func DefaultRNG() (*rand.Rand, error) {
 }
 
 // Generate generates and returns a random hero name.
-// Eventually you can specify a `tokenLength` greater
-// then zero to generate and additional token and create
-// even more entropy.
-func Generate(rng *rand.Rand, tokenLength int) string {
+func Generate(rng *rand.Rand) string {
 	res := fmt.Sprintf("%s%s", randomAdjective(rng), randomNoun(rng))
-	if tokenLength > 0 {
-		res = fmt.Sprintf("%s-%s", res, randomToken(rng, tokenLength))
+	if len(res) > 15 {
+		return res[:15]
 	}
 	return res
 }

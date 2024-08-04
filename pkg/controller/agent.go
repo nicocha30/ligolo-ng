@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/protocol"
-	"net"
+	"github.com/nicocha30/ligolo-ng/pkg/proxy"
 )
-
-var ListenerCounter = 0
 
 type LigoloAgent struct {
 	Name      string
@@ -17,24 +15,37 @@ type LigoloAgent struct {
 	CloseChan chan bool
 	Interface string
 	Running   bool
+	Listeners []*proxy.LigoloListener
 }
 
-type Listener struct {
-	Agent        LigoloAgent
-	Network      string
-	ListenerAddr string
-	RedirectAddr string
-
-	Session    net.Conn
-	ListenerID int32
+func (la *LigoloAgent) AddListener(addr string, network string, to string) (*proxy.LigoloListener, error) {
+	proxyListener, err := proxy.NewListener(la.Session, addr, network, to)
+	if err != nil {
+		return nil, err
+	}
+	la.Listeners = append(la.Listeners, &proxyListener)
+	return &proxyListener, nil
 }
 
-func (l Listener) String() string {
-	return fmt.Sprintf("[%s] (%s) [Agent] %s => [Proxy] %s", l.Agent.Name, l.Network, l.ListenerAddr, l.RedirectAddr)
+func (la *LigoloAgent) GetListener(id int) *proxy.LigoloListener {
+	for _, listener := range la.Listeners {
+		if listener.ID == int32(id) {
+			return listener
+		}
+	}
+	return nil
+}
+
+func (la *LigoloAgent) DeleteListener(id int) {
+	for i, listener := range la.Listeners {
+		if listener.ID == int32(id) {
+			la.Listeners = append(la.Listeners[:i], la.Listeners[i+1:]...)
+		}
+	}
 }
 
 func (la *LigoloAgent) String() string {
-	raddr := "Disconnected"
+	raddr := "[Offline]"
 	if la.Session != nil {
 		raddr = la.Session.RemoteAddr().String()
 	}

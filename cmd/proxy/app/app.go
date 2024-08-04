@@ -10,6 +10,7 @@ import (
 	"github.com/desertbit/grumble"
 	"github.com/hashicorp/yamux"
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/nicocha30/ligolo-ng/pkg/controller"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack"
@@ -18,13 +19,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 var AgentList map[int]*controller.LigoloAgent
 var AgentListMutex sync.Mutex
-var ListenerList map[int]controller.Listener
-var ListenerListMutex sync.Mutex
 var ProxyController *controller.Controller
 
 // CurrentAgentID points to the selected agent in the UI (when running session)
@@ -50,18 +48,37 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 			if registeredAgents.Running {
 				go StartTunnel(registeredAgents, registeredAgents.Interface)
 			}
+
+			for lid, listener := range registeredAgents.Listeners {
+				logrus.Info("Restarting listener: %s", listener.String())
+				if err := listener.ResetMultiplexer(registeredAgents.Session); err != nil {
+					logrus.Errorf("Failed to reset yamux: %v", err)
+				}
+				if err := listener.Stop(); err != nil {
+					logrus.Error(err)
+				}
+
+				lis, err := proxy.NewListener(registeredAgents.Session, listener.ListenerAddr(), listener.Network(), listener.RedirectAddr())
+				if err != nil {
+					logrus.Error(err)
+				}
+				registeredAgents.Listeners[lid] = &lis
+				go func() {
+					err := lis.StartRelay()
+					if err != nil {
+						logrus.WithFields(logrus.Fields{"listener": lis.String(), "agent": agent.Name}).Error("Listener relay failed with error: ", err)
+						return
+					}
+
+					logrus.WithFields(logrus.Fields{"listener": lis.String(), "agent": agent.Name}).Warning("Listener ended without error.")
+					return
+				}()
+			}
 			return nil
 		}
 	}
 	AgentCounter++
 	AgentList[AgentCounter] = agent
-	return nil
-}
-
-func UnregisterAgent(agent *controller.LigoloAgent) error {
-	/*AgentListMutex.Lock()
-	delete(AgentList, agent.Id)
-	AgentListMutex.Unlock()*/
 	return nil
 }
 
@@ -113,8 +130,6 @@ func StartTunnel(agent *controller.LigoloAgent, tunName string) {
 func Run() {
 	// AgentList contains all the connected agents
 	AgentList = make(map[int]*controller.LigoloAgent)
-	// ListenerList contains all listener relays
-	ListenerList = make(map[int]controller.Listener)
 
 	App.AddCommand(&grumble.Command{
 		Name:  "session",
@@ -375,13 +390,18 @@ func Run() {
 			t := table.NewWriter()
 			t.SetStyle(table.StyleLight)
 			t.SetTitle("Active listeners")
-			t.AppendHeader(table.Row{"#", "Agent", "Network", "Agent listener address", "Proxy redirect address"})
+			t.AppendHeader(table.Row{"#", "Agent", "Network", "Agent listener address", "Proxy redirect address", "Status"})
 
-			ListenerListMutex.Lock()
-			for id, listener := range ListenerList {
-				t.AppendRow(table.Row{id, listener.Agent.String(), listener.Network, listener.ListenerAddr, listener.RedirectAddr})
+			for _, agent := range AgentList {
+				for _, listener := range agent.Listeners {
+					status := text.Colors{text.FgGreen}.Sprintf("Online")
+					if agent.Session == nil || agent.Session.IsClosed() {
+						status = text.Colors{text.FgRed}.Sprintf("Offline")
+					}
+					t.AppendRow(table.Row{listener.ID, agent.String(), listener.Network(), listener.ListenerAddr(), listener.RedirectAddr(), status})
+				}
 			}
-			ListenerListMutex.Unlock()
+
 			c.App.Println(t.Render())
 			return nil
 		},
@@ -390,35 +410,56 @@ func Run() {
 	App.AddCommand(&grumble.Command{
 		Name:      "listener_stop",
 		Help:      "Stop a listener",
-		Usage:     "listener_stop [id]",
+		Usage:     "listener_stop",
 		HelpGroup: "Listeners",
-		Args: func(a *grumble.Args) {
-			a.Int("id", "listener id")
-		},
 		Run: func(c *grumble.Context) error {
-			if _, ok := AgentList[CurrentAgentID]; !ok {
-				return ErrInvalidAgent
+			var session string
+			type LigoloListenerAgent struct {
+				listener *proxy.LigoloListener
+				agent    *controller.LigoloAgent
 			}
-			CurrentAgent := AgentList[CurrentAgentID]
-			ListenerListMutex.Lock()
-			if _, ok := ListenerList[c.Args.Int("id")]; !ok {
-				ListenerListMutex.Unlock()
-				return errors.New("invalid listener id")
-			}
-			listener := ListenerList[c.Args.Int("id")]
-			ListenerListMutex.Unlock()
-			listener.Session.Close()
+			listenerMap := make(map[int]LigoloListenerAgent)
+			listenerSelector := &survey.Select{
+				Message: "Specify the listener to stop:",
+				Options: func() (out []string) {
+					AgentListMutex.Lock()
+					i := 0
+					for _, agent := range AgentList {
+						for _, listener := range agent.Listeners {
+							status := text.Colors{text.FgGreen}.Sprintf("Online")
+							if agent.Session == nil || agent.Session.IsClosed() {
+								status = text.Colors{text.FgRed}.Sprintf("Offline")
+							}
+							out = append(out, fmt.Sprintf("%d - Agent: %s - Net: %s - Agent Listener: %s - Redirect: %s [%s]", i, agent.String(), listener.Network(), listener.ListenerAddr(), listener.RedirectAddr(), status))
+							listenerMap[i] = LigoloListenerAgent{listener: listener, agent: agent}
+							i++
+						}
+					}
 
-			if err := proxy.ListenerStop(CurrentAgent.Session, listener.ListenerID); err != nil {
+					AgentListMutex.Unlock()
+					return
+				}(),
+			}
+
+			err := survey.AskOne(listenerSelector, &session)
+			if err != nil {
 				return err
 			}
 
-			logrus.Info("Listener closed.")
+			s := strings.Split(session, " ")
+			listenerId, err := strconv.Atoi(s[0])
+			if err != nil {
+				return err
+			}
 
-			// Delete from the Listener List
-			ListenerListMutex.Lock()
-			delete(ListenerList, c.Args.Int("id"))
-			ListenerListMutex.Unlock()
+			if listener, ok := listenerMap[listenerId]; ok {
+				if err := listener.listener.Stop(); err != nil {
+					return err
+				}
+				listener.agent.DeleteListener(int(listener.listener.ID))
+			} else {
+				return errors.New("invalid listener id")
+			}
 
 			return nil
 		},
@@ -434,8 +475,6 @@ func Run() {
 			f.BoolL("udp", false, "Use UDP listener")
 			f.StringL("addr", "", "The agent listening address:port")
 			f.StringL("to", "", "Where to redirect connections")
-			f.BoolL("no-retry", false, "Do not restart relay on listener error")
-
 		},
 		Run: func(c *grumble.Context) error {
 			if _, ok := AgentList[CurrentAgentID]; !ok {
@@ -472,43 +511,22 @@ func Run() {
 				return err
 			}
 
-			proxyListener, err := proxy.NewListener(CurrentAgent.Session, c.Flags.String("addr"), netProto, c.Flags.String("to"))
+			proxyListener, err := CurrentAgent.AddListener(c.Flags.String("addr"), netProto, c.Flags.String("to"))
 			if err != nil {
 				return err
 			}
 
 			logrus.Infof("Listener %d created on remote agent!", proxyListener.ID)
 
-			// Register the listener in the UI
-			listener := controller.Listener{
-				Agent:        *CurrentAgent,
-				Network:      netProto,
-				ListenerAddr: c.Flags.String("addr"),
-				RedirectAddr: c.Flags.String("to"),
-				Session:      proxyListener.Conn,
-				ListenerID:   proxyListener.ID,
-			}
-			ListenerListMutex.Lock()
-			ListenerList[controller.ListenerCounter] = listener
-			ListenerListMutex.Unlock()
-			controller.ListenerCounter++
-
 			go func() {
-				for {
-					err := proxyListener.StartRelay()
-					if err != nil {
-						logrus.WithFields(logrus.Fields{"listener": listener.String()}).Error("Listener relay failed with error: ", err)
-						if !c.Flags.Bool("no-retry") {
-							logrus.Warning("Listener failed. Restarting in 5 seconds...")
-							time.Sleep(time.Second * 5)
-							continue
-						}
-						return
-					}
-
-					logrus.WithFields(logrus.Fields{"listener": listener.String()}).Warning("Listener ended without error.")
+				err := proxyListener.StartRelay()
+				if err != nil {
+					logrus.WithFields(logrus.Fields{"listener": proxyListener.String(), "agent": CurrentAgent.Name}).Error("Listener relay failed with error: ", err)
 					return
 				}
+
+				logrus.WithFields(logrus.Fields{"listener": proxyListener.String(), "agent": CurrentAgent.Name}).Warning("Listener ended without error.")
+				return
 			}()
 
 			return nil

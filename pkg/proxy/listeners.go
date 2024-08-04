@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/protocol"
 	"github.com/nicocha30/ligolo-ng/pkg/relay"
@@ -10,37 +11,6 @@ import (
 	"io"
 	"net"
 )
-
-func ListenerStop(sess *yamux.Session, listenerId int32) error {
-	// Open Yamux connection
-	yamuxConnectionSession, err := sess.Open()
-	if err != nil {
-		return err
-	}
-
-	ligoloProtocol := protocol.NewEncoderDecoder(yamuxConnectionSession)
-
-	// Send close request
-	closeRequest := protocol.ListenerCloseRequestPacket{ListenerID: listenerId}
-	if err := ligoloProtocol.Encode(protocol.Envelope{
-		Type:    protocol.MessageListenerCloseRequest,
-		Payload: closeRequest,
-	}); err != nil {
-		return err
-	}
-
-	// Process close response
-	if err := ligoloProtocol.Decode(); err != nil {
-		return err
-
-	}
-	response := ligoloProtocol.Envelope.Payload
-
-	if err := response.(protocol.ListenerCloseResponsePacket).Err; err != false {
-		return errors.New(response.(protocol.ListenerCloseResponsePacket).ErrString)
-	}
-	return nil
-}
 
 type LigoloListener struct {
 	ID      int32
@@ -81,6 +51,64 @@ func NewListener(sess *yamux.Session, addr string, network string, to string) (L
 	return LigoloListener{ID: response.ListenerID, sess: sess, Conn: conn, addr: addr, network: network, to: to}, nil
 }
 
+func (l *LigoloListener) ResetMultiplexer(sess *yamux.Session) error {
+	// Change the listener session, used in session recovery mechanism
+	l.sess = sess
+	conn, err := sess.Open()
+	if err != nil {
+		return err
+	}
+	l.Conn = conn
+	return nil
+}
+
+func (l *LigoloListener) RedirectAddr() string {
+	return l.to
+}
+
+func (l *LigoloListener) ListenerAddr() string {
+	return l.addr
+}
+
+func (l *LigoloListener) Network() string {
+	return l.network
+}
+
+func (l *LigoloListener) String() string {
+	return fmt.Sprintf("[#%d] (%s) [Agent] %s => [Proxy] %s", l.ID, l.network, l.addr, l.to)
+}
+
+func (l *LigoloListener) Stop() error {
+	// Open Yamux connection
+	yamuxConnectionSession, err := l.sess.Open()
+	if err != nil {
+		return err
+	}
+
+	ligoloProtocol := protocol.NewEncoderDecoder(yamuxConnectionSession)
+
+	// Send close request
+	closeRequest := protocol.ListenerCloseRequestPacket{ListenerID: l.ID}
+	if err := ligoloProtocol.Encode(protocol.Envelope{
+		Type:    protocol.MessageListenerCloseRequest,
+		Payload: closeRequest,
+	}); err != nil {
+		return err
+	}
+
+	// Process close response
+	if err := ligoloProtocol.Decode(); err != nil {
+		return err
+
+	}
+	response := ligoloProtocol.Envelope.Payload
+
+	if err := response.(protocol.ListenerCloseResponsePacket).Err; err != false {
+		return errors.New(response.(protocol.ListenerCloseResponsePacket).ErrString)
+	}
+	return nil
+}
+
 func (l *LigoloListener) StartRelay() error {
 	if l.network == "tcp" {
 		return l.relayTCP()
@@ -97,6 +125,7 @@ func (l *LigoloListener) relayTCP() error {
 		if err := ligoloProtocol.Decode(); err != nil {
 			if err == io.EOF {
 				// Listener closed.
+				logrus.Debug("Listener closed connection (EOF)")
 				return nil
 			}
 			return err

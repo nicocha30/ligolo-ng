@@ -8,4 +8,5 @@ var App = grumble.New(&grumble.Config{
 	Description:           "Ligolo-ng - An advanced, yet simple tunneling tool",
 	HelpHeadlineUnderline: true,
 	HelpSubCommands:       true,
+	HistoryFile:           "ligolo-ng.history",
 })
