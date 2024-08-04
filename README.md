@@ -17,7 +17,7 @@ You use Ligolo-ng for your penetration tests? Did it help you pass a certificati
 
 We would like to thank the following people for their support in the development of Ligolo-ng.
 
-<!-- sponsors --><!-- sponsors -->
+<!-- sponsors --><a href="https://github.com/OSCPL-byte"><img src="https://github.com/OSCPL-byte.png" width="50px" alt="OSCPL-byte" /></a>&nbsp;&nbsp;<!-- sponsors -->
 
 ## Table of Contents
 
