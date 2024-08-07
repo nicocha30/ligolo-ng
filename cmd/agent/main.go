@@ -99,7 +99,7 @@ func main() {
 	}
 
 	serverUrl, err := url.Parse(*serverAddr)
-	if err != nil && serverUrl != nil {
+	if err == nil && serverUrl != nil {
 		if serverUrl.Scheme == "https" {
 			//websocket https connection
 			tlsConfig.ServerName = serverUrl.Hostname()
