@@ -99,9 +99,11 @@ func main() {
 	}
 
 	serverUrl, err := url.Parse(*serverAddr)
-	if serverUrl.Scheme == "https" && err == nil {
-		//websocket https connection
-		tlsConfig.ServerName = serverUrl.Hostname()
+	if err != nil && serverUrl != nil {
+		if serverUrl.Scheme == "https" {
+			//websocket https connection
+			tlsConfig.ServerName = serverUrl.Hostname()
+		}
 	} else {
 		//direct connection. try to parse as host:port
 		host, _, err := net.SplitHostPort(*serverAddr)
@@ -120,7 +122,7 @@ func main() {
 
 	for {
 		var err error
-		if serverUrl.Scheme == "https" {
+		if serverUrl != nil && serverUrl.Scheme == "https" {
 			*serverAddr = strings.Replace(*serverAddr, "https://", "wss://", 1)
 			//websocket
 			err = wsconnect(&tlsConfig, *serverAddr, *socksProxy, *userAgent)
