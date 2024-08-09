@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/protocol"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy"
@@ -64,10 +65,7 @@ func NewAgent(session *yamux.Session) (*LigoloAgent, error) {
 	protocolEncoder := protocol.NewEncoder(yamuxConnectionSession)
 	protocolDecoder := protocol.NewDecoder(yamuxConnectionSession)
 
-	if err := protocolEncoder.Encode(protocol.Envelope{
-		Type:    protocol.MessageInfoRequest,
-		Payload: infoRequest,
-	}); err != nil {
+	if err := protocolEncoder.Encode(infoRequest); err != nil {
 		return nil, err
 	}
 
@@ -75,8 +73,7 @@ func NewAgent(session *yamux.Session) (*LigoloAgent, error) {
 		return nil, err
 	}
 
-	response := protocolDecoder.Envelope.Payload
-	reply := response.(protocol.InfoReplyPacket)
+	reply := protocolDecoder.Payload.(*protocol.InfoReplyPacket)
 
 	return &LigoloAgent{
 		Name:      reply.Name,

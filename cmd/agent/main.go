@@ -9,18 +9,19 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/agent"
 	"github.com/nicocha30/ligolo-ng/pkg/utils/selfcert"
 	"github.com/sirupsen/logrus"
 	goproxy "golang.org/x/net/proxy"
-	"net"
-	"net/http"
-	"net/url"
 	"nhooyr.io/websocket"
-	"os"
-	"strings"
-	"time"
 )
 
 var (
@@ -46,8 +47,8 @@ func main() {
 	flag.Usage = func() {
 		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
 		fmt.Println("Made in France with love by @Nicocha30!")
-		fmt.Println("https://github.com/nicocha30/ligolo-ng\n")
-		fmt.Printf("Usage of %s:\n", os.Args[0])
+		fmt.Println("https://github.com/nicocha30/ligolo-ng")
+		fmt.Printf("\nUsage of %s:\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 

@@ -19,6 +19,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/nicocha30/gvisor-ligolo v0.0.0-20230726075806-989fa2c0a413
 	github.com/vishvananda/netlink v1.1.1-0.20211118161826-650dca95af54
+	github.com/vmihailenco/msgpack/v5 v5.4.1
 	golang.org/x/sys v0.21.0
 	nhooyr.io/websocket v1.8.11
 )
@@ -39,6 +40,7 @@ require (
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect
 	golang.org/x/term v0.21.0 // indirect
 	golang.org/x/text v0.16.0 // indirect

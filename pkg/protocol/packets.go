@@ -7,7 +7,6 @@ import (
 // Envelope is the structure used when Encoding/Decode ligolo packets
 type Envelope struct {
 	Type    uint8
-	Size    int32
 	Payload interface{}
 }
 

@@ -34,8 +34,8 @@ func main() {
 	flag.Usage = func() {
 		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
 		fmt.Println("Made in France with love by @Nicocha30!")
-		fmt.Println("https://github.com/nicocha30/ligolo-ng\n")
-		fmt.Printf("Usage of %s:\n", os.Args[0])
+		fmt.Println("https://github.com/nicocha30/ligolo-ng")
+		fmt.Printf("\nUsage of %s:\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -62,8 +62,8 @@ func main() {
 		a.Println("  / /   / / __ `/ __ \\/ / __ \\______/ __ \\/ __ `/")
 		a.Println(" / /___/ / /_/ / /_/ / / /_/ /_____/ / / / /_/ / ")
 		a.Println("/_____/_/\\__, /\\____/_/\\____/     /_/ /_/\\__, /  ")
-		a.Println("        /____/                          /____/   \n")
-		a.Println("  Made in France ♥            by @Nicocha30!")
+		a.Println("        /____/                          /____/   ")
+		a.Println("\n  Made in France ♥            by @Nicocha30!")
 		a.Printf("  Version: %s\n\n", version)
 	})
 
