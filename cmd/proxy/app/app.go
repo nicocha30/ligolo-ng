@@ -6,6 +6,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/desertbit/grumble"
 	"github.com/hashicorp/yamux"
@@ -15,10 +20,6 @@ import (
 	"github.com/nicocha30/ligolo-ng/pkg/proxy"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack"
 	"github.com/sirupsen/logrus"
-	"net"
-	"strconv"
-	"strings"
-	"sync"
 )
 
 var AgentList map[int]*controller.LigoloAgent
@@ -50,7 +51,7 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 			}
 
 			for lid, listener := range registeredAgents.Listeners {
-				logrus.Info("Restarting listener: %s", listener.String())
+				logrus.Info(fmt.Sprintf("Restarting listener: %s", listener.String()))
 				if err := listener.ResetMultiplexer(registeredAgents.Session); err != nil {
 					logrus.Errorf("Failed to reset yamux: %v", err)
 				}

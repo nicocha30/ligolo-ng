@@ -10,12 +10,9 @@ import (
 func TestEncodeDecode(t *testing.T) {
 	var buffer bytes.Buffer
 
-	baseEnveloppe := Envelope{
-		Type:    MessageInfoReply,
-		Payload: InfoReplyPacket{Name: "hello"},
-	}
+	baseEnvelope := InfoReplyPacket{Name: "hello"}
 	enc := NewEncoder(&buffer)
-	if err := enc.Encode(baseEnveloppe); err != nil {
+	if err := enc.Encode(baseEnvelope); err != nil {
 		t.Fatal(err)
 	}
 
@@ -28,9 +25,9 @@ func TestEncodeDecode(t *testing.T) {
 		}
 	}
 
-	fmt.Printf("Envelope: %+v\n", dec.Envelope)
+	fmt.Printf("Envelope: %+v\n", dec.Payload)
 
-	if dec.Envelope.Payload.(InfoReplyPacket).Name != "hello" {
+	if dec.Payload.(InfoReplyPacket).Name != "hello" {
 		t.Fatal("invalid packet decoded")
 	}
 

@@ -1,6 +1,9 @@
 package netstack
 
 import (
+	"io"
+	"net"
+
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/adapters/gonet"
@@ -13,8 +16,6 @@ import (
 	"github.com/nicocha30/ligolo-ng/pkg/protocol"
 	"github.com/nicocha30/ligolo-ng/pkg/relay"
 	"github.com/sirupsen/logrus"
-	"io"
-	"net"
 )
 
 // handleICMP process incoming ICMP packets and, depending on the target host status, respond a ICMP ECHO Reply
@@ -39,10 +40,7 @@ func handleICMP(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Session
 		protocolEncoder := protocol.NewEncoder(yamuxConnectionSession)
 		protocolDecoder := protocol.NewDecoder(yamuxConnectionSession)
 
-		if err := protocolEncoder.Encode(protocol.Envelope{
-			Type:    protocol.MessageHostPingRequest,
-			Payload: icmpPacket,
-		}); err != nil {
+		if err := protocolEncoder.Encode(icmpPacket); err != nil {
 			logrus.Error(err)
 			return
 		}
@@ -53,8 +51,7 @@ func handleICMP(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Session
 			return
 		}
 
-		response := protocolDecoder.Envelope.Payload
-		reply := response.(protocol.HostPingResponsePacket)
+		reply := protocolDecoder.Payload.(*protocol.HostPingResponsePacket)
 		if reply.Alive {
 			logrus.Debug("Host is alive, sending reply")
 			ProcessICMP(nstack, pkt)
@@ -122,10 +119,7 @@ func HandlePacket(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Sessi
 	protocolEncoder := protocol.NewEncoder(yamuxConnectionSession)
 	protocolDecoder := protocol.NewDecoder(yamuxConnectionSession)
 
-	if err := protocolEncoder.Encode(protocol.Envelope{
-		Type:    protocol.MessageConnectRequest,
-		Payload: connectPacket,
-	}); err != nil {
+	if err := protocolEncoder.Encode(connectPacket); err != nil {
 		logrus.Error(err)
 		return
 	}
@@ -138,8 +132,7 @@ func HandlePacket(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Sessi
 		return
 	}
 
-	response := protocolDecoder.Envelope.Payload
-	reply := response.(protocol.ConnectResponsePacket)
+	reply := protocolDecoder.Payload.(*protocol.ConnectResponsePacket)
 	if reply.Established {
 		logrus.Debug("Connection established on remote end!")
 		go func() {
