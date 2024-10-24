@@ -67,11 +67,11 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 				go func() {
 					err := lis.StartRelay()
 					if err != nil {
-						logrus.WithFields(logrus.Fields{"listener": lis.String(), "agent": agent.Name}).Error("Listener relay failed with error: ", err)
+						logrus.WithFields(logrus.Fields{"listener": lis.String(), "agent": agent.Name, "id": agent.SessionID}).Error("Listener relay failed with error: ", err)
 						return
 					}
 
-					logrus.WithFields(logrus.Fields{"listener": lis.String(), "agent": agent.Name}).Warning("Listener ended without error.")
+					logrus.WithFields(logrus.Fields{"listener": lis.String(), "agent": agent.Name, "id": agent.SessionID}).Warning("Listener ended without error.")
 					return
 				}()
 			}
@@ -84,7 +84,7 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 }
 
 func StartTunnel(agent *controller.LigoloAgent, tunName string) {
-	logrus.Infof("Starting tunnel to %s", agent.Name)
+	logrus.Infof("Starting tunnel to %s (%s)", agent.Name, agent.SessionID)
 	ligoloStack, err := proxy.NewLigoloTunnel(netstack.StackSettings{
 		TunName:     tunName,
 		MaxInflight: 4096,
@@ -107,11 +107,11 @@ func StartTunnel(agent *controller.LigoloAgent, tunName string) {
 	for {
 		select {
 		case <-agent.CloseChan: // User stopped
-			logrus.Infof("Closing tunnel to %s...", agent.Name)
+			logrus.Infof("Closing tunnel to %s (%s)...", agent.Name, agent.SessionID)
 			cancelTunnel()
 			return
 		case <-agent.Session.CloseChan(): // Agent closed
-			logrus.Warnf("Lost tunnel connection with agent %s!", agent.Name)
+			logrus.Warnf("Lost tunnel connection with agent %s (%s)!", agent.Name, agent.SessionID)
 			//agent.Running = false
 			//agent.Session = nil
 
@@ -239,7 +239,7 @@ func Run() {
 				return err
 			}
 
-			logrus.WithFields(logrus.Fields{"remote": remoteConn.RemoteAddr(), "name": agent.Name}).Info("Agent connected.")
+			logrus.WithFields(logrus.Fields{"remote": remoteConn.RemoteAddr(), "name": agent.Name, "id": agent.SessionID}).Info("Agent connected.")
 
 			if err := RegisterAgent(agent); err != nil {
 				logrus.Errorf("could not register agent: %s", err.Error())
@@ -522,11 +522,11 @@ func Run() {
 			go func() {
 				err := proxyListener.StartRelay()
 				if err != nil {
-					logrus.WithFields(logrus.Fields{"listener": proxyListener.String(), "agent": CurrentAgent.Name}).Error("Listener relay failed with error: ", err)
+					logrus.WithFields(logrus.Fields{"listener": proxyListener.String(), "agent": CurrentAgent.Name, "id": CurrentAgent.SessionID}).Error("Listener relay failed with error: ", err)
 					return
 				}
 
-				logrus.WithFields(logrus.Fields{"listener": proxyListener.String(), "agent": CurrentAgent.Name}).Warning("Listener ended without error.")
+				logrus.WithFields(logrus.Fields{"listener": proxyListener.String(), "agent": CurrentAgent.Name, "id": CurrentAgent.SessionID}).Warning("Listener ended without error.")
 				return
 			}()
 
