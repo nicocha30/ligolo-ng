@@ -108,7 +108,7 @@ func main() {
 				continue
 			}
 
-			logrus.WithFields(logrus.Fields{"remote": remoteConn.RemoteAddr(), "name": agent.Name}).Info("Agent joined.")
+			logrus.WithFields(logrus.Fields{"remote": remoteConn.RemoteAddr(), "name": agent.Name, "id": agent.SessionID}).Info("Agent joined.")
 
 			if err := app.RegisterAgent(agent); err != nil {
 				logrus.Errorf("could not register agent: %s", err.Error())
@@ -119,7 +119,7 @@ func main() {
 				for {
 					select {
 					case <-agent.Session.CloseChan(): // Agent closed
-						logrus.Warnf("Lost ligolo-ng connection with agent %s!", agent.Name)
+						logrus.WithFields(logrus.Fields{"remote": remoteConn.RemoteAddr(), "name": agent.Name, "id": agent.SessionID}).Warnf("Lost ligolo-ng connection with agent!")
 						return
 					}
 				}
