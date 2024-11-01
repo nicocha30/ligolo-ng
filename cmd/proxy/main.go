@@ -119,7 +119,7 @@ func main() {
 				for {
 					select {
 					case <-agent.Session.CloseChan(): // Agent closed
-						logrus.WithFields(logrus.Fields{"remote": remoteConn.RemoteAddr(), "name": agent.Name, "id": agent.SessionID}).Warnf("Lost ligolo-ng connection with agent!")
+						logrus.WithFields(logrus.Fields{"remote": remoteConn.RemoteAddr(), "name": agent.Name, "id": agent.SessionID}).Warnf("Agent dropped.")
 						return
 					}
 				}
