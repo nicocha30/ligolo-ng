@@ -183,9 +183,10 @@ func Run() {
 	})
 
 	App.AddCommand(&grumble.Command{
-		Name:  "certificate_fingerprint",
-		Help:  "Show the current selfcert fingerprint",
-		Usage: "certificate_fingerprint",
+		Name:    "certificate-fingerprint",
+		Help:    "Show the current selfcert fingerprint",
+		Usage:   "certificate-fingerprint",
+		Aliases: []string{"cf"},
 
 		Run: func(c *grumble.Context) error {
 			selfcrt := ProxyController.SelfCert
@@ -199,21 +200,25 @@ func Run() {
 	})
 
 	App.AddCommand(&grumble.Command{
-		Name:  "connect_agent",
-		Help:  "Attempt to connect to a bind agent",
-		Usage: "connect_agent --ip [agentip]",
+		Name:    "connect-agent",
+		Help:    "Attempt to connect to a bind agent",
+		Usage:   "connect-agent --ip [agentip]",
+		Aliases: []string{"ca"},
 		Flags: func(f *grumble.Flags) {
-			f.StringL("ip", "", "The agent ip:port")
 			f.BoolL("ignore-cert", false, "Ignore TLS certificate verification")
+		},
+		Args: func(a *grumble.Args) {
+			a.String("ip", "The agent ip:port")
 		},
 		Run: func(c *grumble.Context) error {
 			tlsConfig := &tls.Config{}
 			tlsConfig.InsecureSkipVerify = true
 
-			remoteConn, err := tls.Dial("tcp", c.Flags.String("ip"), tlsConfig)
+			remoteConn, err := tls.Dial("tcp", c.Args.String("ip"), tlsConfig)
 			if err != nil {
 				return err
 			}
+
 			if !c.Flags.Bool("ignore-cert") {
 				cert := remoteConn.ConnectionState().PeerCertificates[0].Raw
 				shaSum := sha256.Sum256(cert)
@@ -221,6 +226,7 @@ func Run() {
 				prompt := &survey.Confirm{
 					Message: fmt.Sprintf("TLS Certificate Fingerprint is: %X, connect?", shaSum),
 				}
+
 				survey.AskOne(prompt, &confirmTLS)
 				if !confirmTLS {
 					remoteConn.Close()
@@ -244,23 +250,30 @@ func Run() {
 			if err := RegisterAgent(agent); err != nil {
 				logrus.Errorf("could not register agent: %s", err.Error())
 			}
+
 			return nil
 		},
 	})
 
-	App.AddCommand(&grumble.Command{
-		Name:      "tunnel_start",
-		Help:      "Start relaying connection to the current agent",
-		Usage:     "tunnel_start --tun ligolo",
-		HelpGroup: "Tunneling",
-		Aliases:   []string{"start"},
-		Flags: func(f *grumble.Flags) {
-			f.StringL("tun", "ligolo", "the interface to run the proxy on")
+	tunnelCmd := &grumble.Command{
+		Name: "tunnel",
+		Help: "Manage tunnels",
+	}
+
+	App.AddCommand(tunnelCmd)
+
+	tunnelCmd.AddCommand(&grumble.Command{
+		Name:  "start",
+		Help:  "Start relaying connection to the current agent",
+		Usage: "start [ifname]",
+		Args: func(a *grumble.Args) {
+			a.String("ifname", "The interface to run the proxy on")
 		},
 		Run: func(c *grumble.Context) error {
 			if _, ok := AgentList[CurrentAgentID]; !ok {
 				return ErrInvalidAgent
 			}
+
 			CurrentAgent := AgentList[CurrentAgentID]
 
 			if CurrentAgent.Session == nil {
@@ -273,22 +286,21 @@ func Run() {
 
 			for _, agent := range AgentList {
 				if agent.Running {
-					if agent.Interface == c.Flags.String("tun") {
-						return errors.New("a tunnel is already using this interface name. Please use a different name using the --tun option")
+					if agent.Interface == c.Args.String("ifname") {
+						return errors.New("a tunnel is already using this interface name. Please use a different name")
 					}
 				}
 			}
 
-			go StartTunnel(CurrentAgent, c.Flags.String("tun"))
+			go StartTunnel(CurrentAgent, c.Args.String("ifname"))
 
 			return nil
 		},
 	})
 
-	App.AddCommand(&grumble.Command{Name: "tunnel_list",
-		Help:      "List active tunnels",
-		Usage:     "tunnel_list",
-		HelpGroup: "Tunneling",
+	tunnelCmd.AddCommand(&grumble.Command{
+		Name: "ls",
+		Help: "List active tunnels",
 		Run: func(c *grumble.Context) error {
 			t := table.NewWriter()
 			t.SetStyle(table.StyleLight)
@@ -298,11 +310,11 @@ func Run() {
 			AgentListMutex.Lock()
 
 			for id, agent := range AgentList {
-
 				if agent.Running {
 					t.AppendRow(table.Row{id, agent.Name, agent.Interface})
 				}
 			}
+
 			AgentListMutex.Unlock()
 			App.Println(t.Render())
 
@@ -310,11 +322,9 @@ func Run() {
 		},
 	})
 
-	App.AddCommand(&grumble.Command{Name: "tunnel_stop",
-		Help:      "Stop the tunnel",
-		Usage:     "stop",
-		HelpGroup: "Tunneling",
-		Aliases:   []string{"stop"},
+	tunnelCmd.AddCommand(&grumble.Command{
+		Name: "stop",
+		Help: "Stop the tunnel",
 		Flags: func(f *grumble.Flags) {
 			f.IntL("agent", -1, "The agent to stop")
 		},
@@ -340,6 +350,7 @@ func Run() {
 			return nil
 		},
 	})
+
 	App.AddCommand(&grumble.Command{
 		Name:  "ifconfig",
 		Help:  "Show agent interfaces",
@@ -382,11 +393,16 @@ func Run() {
 		},
 	})
 
-	App.AddCommand(&grumble.Command{
-		Name:      "listener_list",
-		Help:      "List currently running listeners",
-		Usage:     "listener_list",
-		HelpGroup: "Listeners",
+	listenerCmd := &grumble.Command{
+		Name: "listener",
+		Help: "Manage listener",
+	}
+
+	App.AddCommand(listenerCmd)
+
+	listenerCmd.AddCommand(&grumble.Command{
+		Name: "ls",
+		Help: "List currently running listeners",
 		Run: func(c *grumble.Context) error {
 			t := table.NewWriter()
 			t.SetStyle(table.StyleLight)
@@ -408,10 +424,9 @@ func Run() {
 		},
 	})
 
-	App.AddCommand(&grumble.Command{
-		Name:      "listener_stop",
+	listenerCmd.AddCommand(&grumble.Command{
+		Name:      "stop",
 		Help:      "Stop a listener",
-		Usage:     "listener_stop",
 		HelpGroup: "Listeners",
 		Run: func(c *grumble.Context) error {
 			var session string
@@ -466,16 +481,17 @@ func Run() {
 		},
 	})
 
-	App.AddCommand(&grumble.Command{
-		Name:      "listener_add",
-		Help:      "Listen on the agent and redirect connections to the desired address",
-		Usage:     "listener_add --addr [agent_listening_address:port] --to [local_listening_address:port] --tcp/--udp (--no-retry)",
-		HelpGroup: "Listeners",
+	listenerCmd.AddCommand(&grumble.Command{
+		Name:  "add",
+		Help:  "Listen on the agent and redirect connections to the desired address",
+		Usage: "add [ADDR] [TO] [OPTIONS]",
+		Args: func(a *grumble.Args) {
+			a.String("addr", "The agent listening (IP:PORT)")
+			a.String("to", "Where to redirect connections (IP:PORT)")
+		},
 		Flags: func(f *grumble.Flags) {
 			f.BoolL("tcp", false, "Use TCP listener")
 			f.BoolL("udp", false, "Use UDP listener")
-			f.StringL("addr", "", "The agent listening address:port")
-			f.StringL("to", "", "Where to redirect connections")
 		},
 		Run: func(c *grumble.Context) error {
 			if _, ok := AgentList[CurrentAgentID]; !ok {
@@ -500,19 +516,19 @@ func Run() {
 				netProto = "tcp" // Use TCP by default.
 			}
 
-			if c.Flags.String("to") == "" {
+			if c.Args.String("to") == "" {
 				return errors.New("please, specify a valid redirect (to) IP address - expected format : ip:port")
 			}
 
 			// Check if specified IP is valid.
-			if _, _, err := net.SplitHostPort(c.Flags.String("to")); err != nil {
+			if _, _, err := net.SplitHostPort(c.Args.String("to")); err != nil {
 				return err
 			}
-			if _, _, err := net.SplitHostPort(c.Flags.String("addr")); err != nil {
+			if _, _, err := net.SplitHostPort(c.Args.String("addr")); err != nil {
 				return err
 			}
 
-			proxyListener, err := CurrentAgent.AddListener(c.Flags.String("addr"), netProto, c.Flags.String("to"))
+			proxyListener, err := CurrentAgent.AddListener(c.Args.String("addr"), netProto, c.Args.String("to"))
 			if err != nil {
 				return err
 			}

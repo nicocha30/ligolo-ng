@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.3.5
-	github.com/desertbit/grumble v1.1.3
+	github.com/desertbit/grumble v0.0.0-20240725064225-cb728c9a422d
 	github.com/go-ping/ping v1.1.0
 	github.com/hashicorp/yamux v0.1.0
 	github.com/jedib0t/go-pretty/v6 v6.3.5
@@ -29,13 +29,13 @@ require (
 	github.com/desertbit/columnize v2.1.0+incompatible // indirect
 	github.com/desertbit/go-shlex v0.1.1 // indirect
 	github.com/desertbit/readline v1.5.1 // indirect
-	github.com/fatih/color v1.13.0 // indirect
+	github.com/fatih/color v1.14.1 // indirect
 	github.com/google/btree v1.1.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
-	github.com/mattn/go-colorable v0.1.12 // indirect
-	github.com/mattn/go-isatty v0.0.14 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
