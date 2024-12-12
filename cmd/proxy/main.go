@@ -21,7 +21,7 @@ var (
 
 func main() {
 	var allowDomains []string
-	var verboseFlag = flag.Bool("v", false, "enable verbose mode")
+	var verboseFlag = flag.Bool("verbose", false, "enable verbose mode")
 	var listenInterface = flag.String("laddr", "0.0.0.0:11601", "listening address (prefix with https:// for websocket)")
 	var enableAutocert = flag.Bool("autocert", false, "automatically request letsencrypt certificates, requires port 80 to be accessible")
 	var enableSelfcert = flag.Bool("selfcert", false, "dynamically generate self-signed certificates")
@@ -29,6 +29,7 @@ func main() {
 	var keyFile = flag.String("keyfile", "certs/key.pem", "TLS server key")
 	var domainWhitelist = flag.String("allow-domains", "", "autocert authorised domains, if empty, allow all domains, multiple domains should be comma-separated.")
 	var selfcertDomain = flag.String("selfcert-domain", "ligolo", "The selfcert TLS domain to use")
+	var noBanner = flag.Bool("no-banner", false, "Hide the banner")
 	var versionFlag = flag.Bool("version", false, "show the current version")
 
 	flag.Usage = func() {
@@ -56,16 +57,18 @@ func main() {
 		allowDomains = strings.Split(*domainWhitelist, ",")
 	}
 
-	app.App.SetPrintASCIILogo(func(a *grumble.App) {
-		a.Println("    __    _             __                       ")
-		a.Println("   / /   (_)___ _____  / /___        ____  ____ _")
-		a.Println("  / /   / / __ `/ __ \\/ / __ \\______/ __ \\/ __ `/")
-		a.Println(" / /___/ / /_/ / /_/ / / /_/ /_____/ / / / /_/ / ")
-		a.Println("/_____/_/\\__, /\\____/_/\\____/     /_/ /_/\\__, /  ")
-		a.Println("        /____/                          /____/   ")
-		a.Println("\n  Made in France ♥            by @Nicocha30!")
-		a.Printf("  Version: %s\n\n", version)
-	})
+	if !*noBanner {
+		app.App.SetPrintASCIILogo(func(a *grumble.App) {
+			a.Println("    __    _             __                       ")
+			a.Println("   / /   (_)___ _____  / /___        ____  ____ _")
+			a.Println("  / /   / / __ `/ __ \\/ / __ \\______/ __ \\/ __ `/")
+			a.Println(" / /___/ / /_/ / /_/ / / /_/ /_____/ / / / /_/ / ")
+			a.Println("/_____/_/\\__, /\\____/_/\\____/     /_/ /_/\\__, /  ")
+			a.Println("        /____/                          /____/   ")
+			a.Println("\n  Made in France ♥            by @Nicocha30!")
+			a.Printf("  Version: %s\n\n", version)
+		})
+	}
 
 	if *enableSelfcert && *selfcertDomain == "ligolo" {
 		logrus.Warning("Using default selfcert domain 'ligolo', beware of CTI, SOC and IoC!")
