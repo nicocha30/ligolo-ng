@@ -150,23 +150,34 @@ func (l *LigoloListener) relayTCP() error {
 				logrus.Error(err)
 				return
 			}
+			// Get response back (ListenerSocketResponsePacket)
 			if err := forwarderProtocolEncDec.Decode(); err != nil {
 				logrus.Error(err)
 				return
 			}
-
 			if err := forwarderProtocolEncDec.Payload.(*protocol.ListenerSockResponsePacket).Err; err != false {
 				logrus.Error(forwarderProtocolEncDec.Payload.(*protocol.ListenerSockResponsePacket).ErrString)
 				return
 			}
-			// Got socket access!
-
-			logrus.Debug("Listener relay established!")
+			// If no error, establish TCP conn!
+			logrus.Debugf("Listener relay established to %s (%s)!", l.to, l.network)
 
 			// Dial the "to" target
+			connFailed := false
 			lconn, err := net.Dial(l.network, l.to)
 			if err != nil {
 				logrus.Error(err)
+				connFailed = true
+			}
+
+			// Send connect ack (avoid races)
+			connectionAckPacket := protocol.ListenerSocketConnectionReady{Err: connFailed}
+			if err := forwarderProtocolEncDec.Encode(connectionAckPacket); err != nil {
+				logrus.Error(err)
+				return
+			}
+
+			if connFailed {
 				return
 			}
 

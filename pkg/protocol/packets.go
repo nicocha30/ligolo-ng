@@ -26,6 +26,7 @@ const (
 	MessageListenerCloseRequest
 	MessageListenerCloseResponse
 	MessageClose
+	MessageListenerSocketConnectionReady
 )
 
 const (
@@ -58,6 +59,10 @@ type ListenerSockRequestPacket struct {
 type ListenerSockResponsePacket struct {
 	ErrString string
 	Err       bool
+}
+
+type ListenerSocketConnectionReady struct {
+	Err bool
 }
 
 // ListenerRequestPacket is used when a new listener socket is created by the proxy.

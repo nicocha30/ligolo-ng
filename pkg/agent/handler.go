@@ -283,7 +283,6 @@ func HandleConn(conn net.Conn) {
 						Err:    false,
 					}
 				}
-
 				if err := encoder.Encode(bindResponse); err != nil {
 					logrus.Error(err)
 				}
@@ -296,7 +295,7 @@ func HandleConn(conn net.Conn) {
 		}
 	case *protocol.ListenerSockRequestPacket:
 		sockRequest := e.Payload.(*protocol.ListenerSockRequestPacket)
-		encoder := protocol.NewEncoder(conn)
+		socketEncDec := protocol.NewEncoderDecoder(conn)
 
 		var sockResponse protocol.ListenerSockResponsePacket
 		if _, ok := listenerConntrack[sockRequest.SockID]; !ok {
@@ -305,7 +304,7 @@ func HandleConn(conn net.Conn) {
 			sockResponse.Err = true
 		}
 
-		if err := encoder.Encode(sockResponse); err != nil {
+		if err := socketEncDec.Encode(sockResponse); err != nil {
 			logrus.Error(err)
 			return
 		}
@@ -314,7 +313,18 @@ func HandleConn(conn net.Conn) {
 			return
 		}
 
+		if err := socketEncDec.Decode(); err != nil {
+			logrus.Error(err)
+			return
+		}
 		netConn := listenerConntrack[sockRequest.SockID]
+
+		if err := socketEncDec.Payload.(*protocol.ListenerSocketConnectionReady).Err; err != false {
+			logrus.Debug("Socket relay session failed: error from proxy")
+			netConn.Close()
+			return
+		}
+
 		relay.StartRelay(netConn, conn)
 
 	case *protocol.ListenerCloseResponsePacket:

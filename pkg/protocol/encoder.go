@@ -47,6 +47,8 @@ func payloadTypeFromInterface(payload interface{}) (uint8, error) {
 		return MessageListenerCloseRequest, nil
 	case ListenerCloseResponsePacket:
 		return MessageListenerCloseResponse, nil
+	case ListenerSocketConnectionReady:
+		return MessageListenerSocketConnectionReady, nil
 	default:
 		return 0, fmt.Errorf("payloadTypeFromInterface called for unknown payload type: %v", payload)
 	}
