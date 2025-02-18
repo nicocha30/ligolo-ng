@@ -1,32 +1,40 @@
 //go:build linux
 
-package tun
+package netinfo
 
 import (
-	"errors"
+	"encoding/json"
 	"github.com/vishvananda/netlink"
 	"net"
 )
 
 type Tun struct {
-	Tap netlink.Link
+	tap netlink.Link
 }
 
 func CreateTUN(name string) error {
 	tun := &Tun{}
 	la := netlink.NewLinkAttrs()
 	la.Name = name
-	tun.Tap = &netlink.Tuntap{
+	tun.tap = &netlink.Tuntap{
 		LinkAttrs: la,
 		Mode:      netlink.TUNTAP_MODE_TUN,
 	}
-	if err := netlink.LinkAdd(tun.Tap); err != nil {
+	if err := netlink.LinkAdd(tun.tap); err != nil {
 		return err
 	}
-	if err := netlink.LinkSetUp(tun.Tap); err != nil {
+	if err := netlink.LinkSetUp(tun.tap); err != nil {
 		return err
 	}
 	return nil
+}
+
+func CanCreateTUNs() bool {
+	return true
+}
+
+func (t *Tun) MarshalJSON() ([]byte, error) {
+	return json.Marshal(TunInfo{Name: t.tap.Attrs().Name, Index: t.tap.Attrs().Index, Routes: t.Routes()})
 }
 
 func (t *Tun) AddRoute(network string) error {
@@ -35,7 +43,7 @@ func (t *Tun) AddRoute(network string) error {
 		return err
 	}
 	if err := netlink.RouteAdd(&netlink.Route{
-		LinkIndex: t.Tap.Attrs().Index,
+		LinkIndex: t.tap.Attrs().Index,
 		Dst:       ipnet,
 	}); err != nil {
 		return err
@@ -49,7 +57,7 @@ func (t *Tun) DelRoute(network string) error {
 		return err
 	}
 	if err := netlink.RouteDel(&netlink.Route{
-		LinkIndex: t.Tap.Attrs().Index,
+		LinkIndex: t.tap.Attrs().Index,
 		Dst:       ipnet,
 	}); err != nil {
 		return err
@@ -58,11 +66,11 @@ func (t *Tun) DelRoute(network string) error {
 }
 
 func (t *Tun) Destroy() error {
-	return netlink.LinkDel(t.Tap)
+	return netlink.LinkDel(t.tap)
 }
 
 func (t *Tun) Name() string {
-	return t.Tap.Attrs().Name
+	return t.tap.Attrs().Name
 }
 
 func GetTunByName(name string) (Tun, error) {
@@ -71,31 +79,21 @@ func GetTunByName(name string) (Tun, error) {
 		return Tun{}, err
 	}
 	return Tun{
-		Tap: link,
+		tap: link,
 	}, nil
 }
 
-func GetTunByRoute(route string) (Tun, error) {
-	tuns, err := GetTunTaps()
-	if err != nil {
-		return Tun{}, err
-	}
-	for _, tun := range tuns {
-		if _, ok := tun.Routes()[route]; ok {
-			return tun, nil
-		}
-	}
-	return Tun{}, errors.New("could not find interface belonging to route")
-}
-
-func (t *Tun) Routes() map[string]netlink.Route {
-	routes, err := netlink.RouteList(t.Tap, netlink.FAMILY_ALL)
+func (t *Tun) Routes() (tapRoutes []Route) {
+	routes, err := netlink.RouteList(t.tap, netlink.FAMILY_ALL)
 	if err != nil {
 		return nil
 	}
-	tapRoutes := make(map[string]netlink.Route)
 	for _, route := range routes {
-		tapRoutes[route.Dst.String()] = route
+		tapRoutes = append(tapRoutes, Route{
+			Dst: route.Dst.String(),
+			Src: route.Src.String(),
+			Gw:  route.Gw.String(),
+		})
 	}
 	return tapRoutes
 }
@@ -109,7 +107,7 @@ func GetTunTaps() ([]Tun, error) {
 	for _, link := range tuns {
 		if link.Type() == "tuntap" {
 			tuntaps = append(tuntaps, Tun{
-				Tap: link,
+				tap: link,
 			})
 		}
 	}

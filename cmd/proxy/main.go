@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/nicocha30/ligolo-ng/cmd/proxy/config"
 	"os"
 	"strings"
 
@@ -30,6 +31,8 @@ func main() {
 	var domainWhitelist = flag.String("allow-domains", "", "autocert authorised domains, if empty, allow all domains, multiple domains should be comma-separated.")
 	var selfcertDomain = flag.String("selfcert-domain", "ligolo", "The selfcert TLS domain to use")
 	var versionFlag = flag.Bool("version", false, "show the current version")
+	var hideBanner = flag.Bool("nobanner", false, "don't show banner on startup")
+	var configFile = flag.String("config", "", "the config file to use")
 
 	flag.Usage = func() {
 		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
@@ -39,6 +42,8 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	config.InitConfig(*configFile)
 
 	if *versionFlag {
 		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
@@ -56,16 +61,18 @@ func main() {
 		allowDomains = strings.Split(*domainWhitelist, ",")
 	}
 
-	app.App.SetPrintASCIILogo(func(a *grumble.App) {
-		a.Println("    __    _             __                       ")
-		a.Println("   / /   (_)___ _____  / /___        ____  ____ _")
-		a.Println("  / /   / / __ `/ __ \\/ / __ \\______/ __ \\/ __ `/")
-		a.Println(" / /___/ / /_/ / /_/ / / /_/ /_____/ / / / /_/ / ")
-		a.Println("/_____/_/\\__, /\\____/_/\\____/     /_/ /_/\\__, /  ")
-		a.Println("        /____/                          /____/   ")
-		a.Println("\n  Made in France ♥            by @Nicocha30!")
-		a.Printf("  Version: %s\n\n", version)
-	})
+	if !*hideBanner {
+		app.App.SetPrintASCIILogo(func(a *grumble.App) {
+			a.Println("    __    _             __                       ")
+			a.Println("   / /   (_)___ _____  / /___        ____  ____ _")
+			a.Println("  / /   / / __ `/ __ \\/ / __ \\______/ __ \\/ __ `/")
+			a.Println(" / /___/ / /_/ / /_/ / / /_/ /_____/ / / / /_/ / ")
+			a.Println("/_____/_/\\__, /\\____/_/\\____/     /_/ /_/\\__, /  ")
+			a.Println("        /____/                          /____/   ")
+			a.Println("\n  Made in France ♥            by @Nicocha30!")
+			a.Printf("  Version: %s\n\n", version)
+		})
+	}
 
 	if *enableSelfcert && *selfcertDomain == "ligolo" {
 		logrus.Warning("Using default selfcert domain 'ligolo', beware of CTI, SOC and IoC!")
@@ -127,6 +134,11 @@ func main() {
 
 		}
 	}()
+
+	if config.Config.GetBool("web.enabled") {
+		logrus.Info("Starting Ligolo-ng Web")
+		go app.StartLigoloApi()
+	}
 
 	// Grumble doesn't like cli args
 	os.Args = []string{}

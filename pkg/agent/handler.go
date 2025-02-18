@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -28,8 +29,7 @@ var sessionID string
 func init() {
 	listenerConntrack = make(map[int32]net.Conn)
 	listenerMap = make(map[int32]interface{})
-	id := uuid.New()
-	sessionID = id.String()
+	sessionID = hex.EncodeToString(uuid.NodeID())
 }
 
 // Listener is the base class implementing listener sockets for Ligolo

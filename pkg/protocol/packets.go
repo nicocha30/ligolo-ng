@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/json"
 	"net"
 )
 
@@ -113,6 +114,26 @@ type NetInterface struct {
 	HardwareAddr net.HardwareAddr // IEEE MAC-48, EUI-48 and EUI-64 form
 	Flags        net.Flags        // e.g., FlagUp, FlagLoopback, FlagMulticast
 	Addresses    []string
+}
+
+func (ni NetInterface) MarshalJSON() ([]byte, error) {
+	type NetInterfaceInfo struct {
+		Index        int
+		MTU          int
+		Name         string
+		HardwareAddr string
+		Flags        net.Flags
+		Addresses    []string
+	}
+
+	return json.Marshal(NetInterfaceInfo{
+		Index:        ni.Index,
+		MTU:          ni.MTU,
+		Name:         ni.Name,
+		HardwareAddr: ni.HardwareAddr.String(),
+		Flags:        ni.Flags,
+		Addresses:    ni.Addresses,
+	})
 }
 
 // NewNetInterfaces converts a net.Interface slice to a NetInterface slice that can be transmitted over Gob

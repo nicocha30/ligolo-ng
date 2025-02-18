@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/yamux"
@@ -13,10 +14,17 @@ type LigoloAgent struct {
 	Network   []protocol.NetInterface
 	Session   *yamux.Session
 	SessionID string
-	CloseChan chan bool
+	CloseChan chan bool `json:"-"`
 	Interface string
 	Running   bool
 	Listeners []*proxy.LigoloListener
+}
+
+func (la *LigoloAgent) Alive() bool {
+	if la.Session != nil && !la.Session.IsClosed() {
+		return true
+	}
+	return false
 }
 
 func (la *LigoloAgent) AddListener(addr string, network string, to string) (*proxy.LigoloListener, error) {
@@ -52,6 +60,28 @@ func (la *LigoloAgent) String() string {
 	}
 
 	return fmt.Sprintf("%s - %s - %s", la.Name, raddr, la.SessionID)
+}
+
+func (la *LigoloAgent) MarshalJSON() ([]byte, error) {
+	type Session struct {
+		Name       string
+		Network    []protocol.NetInterface
+		SessionID  string
+		RemoteAddr string
+		Interface  string
+		Running    bool
+		Listeners  []*proxy.LigoloListener
+	}
+
+	return json.Marshal(Session{
+		Name:       la.Name,
+		Running:    la.Running,
+		Listeners:  la.Listeners,
+		Network:    la.Network,
+		Interface:  la.Interface,
+		SessionID:  la.SessionID,
+		RemoteAddr: la.Session.RemoteAddr().String(),
+	})
 }
 
 func NewAgent(session *yamux.Session) (*LigoloAgent, error) {

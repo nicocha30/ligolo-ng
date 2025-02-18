@@ -2,11 +2,16 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/nicocha30/ligolo-ng/cmd/proxy/config"
+	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,13 +43,29 @@ var (
 	ErrNotRunning     = errors.New("no tunnel started")
 )
 
+func genRandomUUID() string {
+	b := make([]byte, 8)
+	_, err := rand.Read(b)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	return hex.EncodeToString(b)
+}
+
 func RegisterAgent(agent *controller.LigoloAgent) error {
 	AgentListMutex.Lock()
 	defer AgentListMutex.Unlock()
+	var recovered bool
 
 	for _, registeredAgents := range AgentList {
 		if agent.SessionID == registeredAgents.SessionID {
+			if registeredAgents.Alive() {
+				logrus.Warnf("Agent %s is already running, skipping recovery.", agent.SessionID)
+				agent.SessionID = fmt.Sprintf("%s-%s", agent.SessionID, genRandomUUID())
+				break
+			}
 			logrus.Infof("Recovered an agent: %s", registeredAgents.Name)
+			recovered = true
 			registeredAgents.Session = agent.Session
 			if registeredAgents.Running {
 				go StartTunnel(registeredAgents, registeredAgents.Interface)
@@ -78,12 +99,33 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 			return nil
 		}
 	}
+	if !recovered {
+		if config.Config.GetBool(fmt.Sprintf("agent.%s.autobind", agent.SessionID)) {
+			autobindInterface := config.Config.GetString(fmt.Sprintf("agent.%s.interface", agent.SessionID))
+			logrus.Infof("Starting autobind session: %s on interface %s", agent.SessionID, autobindInterface)
+			go StartTunnel(agent, autobindInterface)
+		}
+	}
 	AgentCounter++
 	AgentList[AgentCounter] = agent
 	return nil
 }
 
 func StartTunnel(agent *controller.LigoloAgent, tunName string) {
+	configState, err := config.GetInterfaceConfigState()
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	if ifaceConfig, ok := configState[tunName]; ok {
+		if runtime.GOOS == "linux" && !ifaceConfig.Active {
+			logrus.Infof("Creating tun interface %s", tunName)
+			if err := netinfo.CreateTUN(tunName); err != nil {
+				logrus.Error(err)
+			}
+		}
+	}
+
 	logrus.Infof("Starting tunnel to %s (%s)", agent.Name, agent.SessionID)
 	ligoloStack, err := proxy.NewLigoloTunnel(netstack.StackSettings{
 		TunName:     tunName,
@@ -93,6 +135,21 @@ func StartTunnel(agent *controller.LigoloAgent, tunName string) {
 		logrus.Error("Unable to create tunnel, err:", err)
 		return
 	}
+
+	if ifaceConfig, ok := configState[tunName]; ok {
+		for _, ifcfg := range ifaceConfig.Routes {
+			if !ifcfg.Active {
+				logrus.Infof("Creating route %s on interface %s", tunName, ifcfg.Destination)
+				tun, err := netinfo.GetTunByName(tunName)
+				if err != nil {
+					logrus.Error(err)
+					continue
+				}
+				tun.AddRoute(ifcfg.Destination)
+			}
+		}
+	}
+
 	ifName, err := ligoloStack.GetStack().Interface().Name()
 	if err != nil {
 		logrus.Warn("unable to get interface name, err:", err)
@@ -140,7 +197,7 @@ func Run() {
 			AgentListMutex.Lock()
 			sessionCount := 0
 			for _, agent := range AgentList {
-				if agent.Session != nil && !agent.Session.IsClosed() {
+				if agent.Alive() {
 					sessionCount += 1
 				}
 			}
@@ -155,7 +212,7 @@ func Run() {
 				Options: func() (out []string) {
 					AgentListMutex.Lock()
 					for id, agent := range AgentList {
-						if agent.Session != nil && !agent.Session.IsClosed() {
+						if agent.Alive() {
 							out = append(out, fmt.Sprintf("%d - %s", id, agent.String()))
 						}
 					}
@@ -273,7 +330,7 @@ func Run() {
 
 			for _, agent := range AgentList {
 				if agent.Running {
-					if agent.Interface == c.Flags.String("tun") {
+					if agent.Interface == c.Flags.String("tun") && agent.Alive() {
 						return errors.New("a tunnel is already using this interface name. Please use a different name using the --tun option")
 					}
 				}
@@ -286,22 +343,27 @@ func Run() {
 	})
 
 	App.AddCommand(&grumble.Command{Name: "tunnel_list",
-		Help:      "List active tunnels",
+		Help:      "List active tunnels and sessions",
 		Usage:     "tunnel_list",
 		HelpGroup: "Tunneling",
+		Aliases:   []string{"session_list"},
 		Run: func(c *grumble.Context) error {
 			t := table.NewWriter()
 			t.SetStyle(table.StyleLight)
-			t.SetTitle("Active tunnels")
-			t.AppendHeader(table.Row{"#", "Agent", "Interface"})
+			t.SetTitle("Active sessions and tunnels")
+			t.AppendHeader(table.Row{"#", "Agent", "Interface", "Status"})
 
 			AgentListMutex.Lock()
 
 			for id, agent := range AgentList {
-
-				if agent.Running {
-					t.AppendRow(table.Row{id, agent.Name, agent.Interface})
+				var status string
+				if agent.Alive() {
+					status = text.Colors{text.FgGreen}.Sprintf("Online")
+				} else {
+					status = text.Colors{text.FgRed}.Sprintf("Offline (Awaiting recovery)")
 				}
+				t.AppendRow(table.Row{id, agent.String(), agent.Interface, status})
+
 			}
 			AgentListMutex.Unlock()
 			App.Println(t.Render())
@@ -395,8 +457,10 @@ func Run() {
 
 			for _, agent := range AgentList {
 				for _, listener := range agent.Listeners {
-					status := text.Colors{text.FgGreen}.Sprintf("Online")
-					if agent.Session == nil || agent.Session.IsClosed() {
+					var status string
+					if agent.Alive() {
+						status = text.Colors{text.FgGreen}.Sprintf("Online")
+					} else {
 						status = text.Colors{text.FgRed}.Sprintf("Offline")
 					}
 					t.AppendRow(table.Row{listener.ID, agent.String(), listener.Network(), listener.ListenerAddr(), listener.RedirectAddr(), status})
@@ -427,8 +491,10 @@ func Run() {
 					i := 0
 					for _, agent := range AgentList {
 						for _, listener := range agent.Listeners {
-							status := text.Colors{text.FgGreen}.Sprintf("Online")
-							if agent.Session == nil || agent.Session.IsClosed() {
+							var status string
+							if agent.Alive() {
+								status = text.Colors{text.FgGreen}.Sprintf("Online")
+							} else {
 								status = text.Colors{text.FgRed}.Sprintf("Offline")
 							}
 							out = append(out, fmt.Sprintf("%d - Agent: %s - Net: %s - Agent Listener: %s - Redirect: %s [%s]", i, agent.String(), listener.Network(), listener.ListenerAddr(), listener.RedirectAddr(), status))
@@ -469,7 +535,7 @@ func Run() {
 	App.AddCommand(&grumble.Command{
 		Name:      "listener_add",
 		Help:      "Listen on the agent and redirect connections to the desired address",
-		Usage:     "listener_add --addr [agent_listening_address:port] --to [local_listening_address:port] --tcp/--udp (--no-retry)",
+		Usage:     "listener_add --addr [agent_listening_address:port] --to [local_listening_address:port] --tcp/--udp",
 		HelpGroup: "Listeners",
 		Flags: func(f *grumble.Flags) {
 			f.BoolL("tcp", false, "Use TCP listener")
