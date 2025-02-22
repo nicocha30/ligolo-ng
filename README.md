@@ -9,7 +9,7 @@ An advanced, yet simple, tunneling tool that uses TUN interfaces.
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/nicocha30)](https://github.com/sponsors/nicocha30)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/nicocha30/ligolo-ng/total)
 
-[📑 Ligolo-ng Documentation (Setup/Quickstart)](https://github.com/nicocha30/ligolo-ng/wiki)
+[📑 Ligolo-ng Documentation (Setup/Quickstart)](https://docs.ligolo.ng/)
 
 You use Ligolo-ng for your penetration tests? Did it help you pass a certification? Please consider sponsoring the project so I can buy my team some drinks. ☕
 
@@ -80,7 +80,7 @@ This allows running tools like *nmap* without the use of *proxychains* (simpler 
 
 ## How to use - documentation - tutorial
 
-You will find the documentation for Ligolo-ng, as well as the steps to follow to get it up and running on the [Ligolo-ng Wiki](https://github.com/nicocha30/ligolo-ng/wiki)
+You will find the documentation for Ligolo-ng, as well as the steps to follow to get it up and running on the [Ligolo-ng Documentation](https://docs.ligolo.ng/)
 
 ## Does it require Administrator/root access ?
 
