@@ -1,4 +1,4 @@
-package selfcert
+package tlsutils
 
 import (
 	"bytes"

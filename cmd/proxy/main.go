@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/nicocha30/ligolo-ng/cmd/proxy/config"
+	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
 	"os"
 	"strings"
 
@@ -81,14 +82,18 @@ func main() {
 	app.Run()
 
 	proxyController := controller.New(controller.ControllerConfig{
-		EnableAutocert:  *enableAutocert,
-		EnableSelfcert:  *enableSelfcert,
-		Address:         *listenInterface,
-		Certfile:        *certFile,
-		Keyfile:         *keyFile,
-		DomainWhitelist: allowDomains,
-		SelfcertDomain:  *selfcertDomain,
+		Address: *listenInterface,
+		CertManagerConfig: &tlsutils.CertManagerConfig{
+			SelfCertCache:   "ligolo-selfcerts",
+			Certfile:        *certFile,
+			Keyfile:         *keyFile,
+			DomainWhitelist: allowDomains,
+			SelfcertDomain:  *selfcertDomain,
+			EnableAutocert:  *enableAutocert,
+			EnableSelfcert:  *enableSelfcert,
+		},
 	})
+
 	app.ProxyController = &proxyController
 
 	go proxyController.ListenAndServe()

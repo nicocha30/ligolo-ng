@@ -2,12 +2,10 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"errors"
-	"github.com/nicocha30/ligolo-ng/pkg/utils/selfcert"
+	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/crypto/acme/autocert"
 	"net"
 	"net/http"
 	"nhooyr.io/websocket"
@@ -15,88 +13,43 @@ import (
 )
 
 type Controller struct {
-	Network       string
-	Connection    chan net.Conn
-	startchan     chan error
-	SelfCertCache autocert.DirCache
-	SelfCert      *tls.Certificate
+	Network    string
+	Connection chan net.Conn
+	startchan  chan error
 	ControllerConfig
 }
 
 type ControllerConfig struct {
-	EnableAutocert  bool
-	EnableSelfcert  bool
-	SelfcertDomain  string
-	Address         string
-	Certfile        string
-	Keyfile         string
-	DomainWhitelist []string
+	Address           string
+	CertManagerConfig *tlsutils.CertManagerConfig
+	tlsConfig         *tls.Config
 }
 
 func New(config ControllerConfig) Controller {
-	return Controller{Network: "tcp", Connection: make(chan net.Conn, 1024), ControllerConfig: config, startchan: make(chan error), SelfCertCache: "ligolo-selfcerts"}
+	return Controller{Network: "tcp", Connection: make(chan net.Conn, 1024), ControllerConfig: config, startchan: make(chan error)}
 }
 
 func (c *Controller) WaitForReady() error {
 	return <-c.startchan
 }
 
-func (c *Controller) ListenAndServe() {
-	var tlsConfig tls.Config
-
-	if c.EnableAutocert {
-		// Enable letsencrypt
-		logrus.Info("Using Let's Encrypt ACME Autocert")
-		certManager := autocert.Manager{
-			Prompt: autocert.AcceptTOS,
-			Cache:  autocert.DirCache("ligolo-certs"),
-		}
-		if len(c.DomainWhitelist) > 0 {
-			certManager.HostPolicy = autocert.HostWhitelist(c.DomainWhitelist...)
-		}
-		tlsConfig.GetCertificate = certManager.GetCertificate
-
-		// Check if port 80 is available
-		lis, err := net.Listen("tcp", ":http")
-		if err != nil {
-			c.startchan <- errors.New("Port 80 is not available, please make sure it's accessible for Let's Encrypt ACME challenge")
-			return
-		}
-		lis.Close()
-
-		go func() {
-			h := certManager.HTTPHandler(nil)
-			http.ListenAndServe(":http", h)
-		}()
-	} else if c.EnableSelfcert {
-		logrus.Warning("Using self-signed certificates")
-		selfcrt := selfcert.NewSelfCert(&c.SelfCertCache)
-		crt, err := selfcrt.GetCertificate(c.SelfcertDomain)
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		logrus.Warnf("TLS Certificate fingerprint for %s is: %X\n", c.SelfcertDomain, sha256.Sum256(crt.Certificate[0]))
-		c.SelfCert = crt
-		tlsConfig.GetCertificate = func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			return crt, nil
-		}
-
-	} else if c.Certfile != "" && c.Keyfile != "" {
-		cer, err := tls.LoadX509KeyPair(c.Certfile, c.Keyfile)
-		if err != nil {
-			logrus.WithFields(logrus.Fields{"certfile": c.Certfile, "keyfile": c.Keyfile}).Error("Could not load TLS certificate. Please make sure paths are correct or use -autocert or -selfcert options")
-			c.startchan <- err
-			return
-		}
-		tlsConfig.Certificates = []tls.Certificate{cer}
-	} else {
-		c.startchan <- errors.New("No valid TLS configuration found, please use -certfile/-keyfile, -autocert or -selfcert options")
-		return
+func (c *Controller) GetSelfCertificateSignature() (*tls.Certificate, error) {
+	if c.CertManagerConfig.EnableSelfcert {
+		return c.tlsConfig.GetCertificate(nil)
 	}
+	return nil, errors.New("selfcert is not enabled")
+}
+
+func (c *Controller) ListenAndServe() {
+	tlsConfig, err := tlsutils.CertManager(c.CertManagerConfig)
+	if err != nil {
+		c.startchan <- err
+	}
+	c.tlsConfig = tlsConfig
 
 	if strings.HasPrefix(c.Address, "https://") {
 		//SSL websocket protocol
-		listener, err := tls.Listen(c.Network, strings.Replace(c.Address, "https://", "", 1), &tlsConfig)
+		listener, err := tls.Listen(c.Network, strings.Replace(c.Address, "https://", "", 1), c.tlsConfig)
 		if err != nil {
 			c.startchan <- err
 			return
@@ -121,7 +74,7 @@ func (c *Controller) ListenAndServe() {
 		err = s.Serve(listener)
 	} else {
 		//direct listen with legacy ligolo-ng protocol
-		listener, err := tls.Listen(c.Network, c.Address, &tlsConfig)
+		listener, err := tls.Listen(c.Network, c.Address, c.tlsConfig)
 		if err != nil {
 			c.startchan <- err
 			return

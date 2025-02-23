@@ -245,11 +245,14 @@ func Run() {
 		Usage: "certificate_fingerprint",
 
 		Run: func(c *grumble.Context) error {
-			selfcrt := ProxyController.SelfCert
+			selfcrt, err := ProxyController.GetSelfCertificateSignature()
+			if err != nil {
+				return err
+			}
 			if selfcrt == nil {
 				return errors.New("certificate is nil")
 			}
-			logrus.Printf("TLS Certificate fingerprint for %s is: %X\n", ProxyController.SelfcertDomain, sha256.Sum256(selfcrt.Certificate[0]))
+			logrus.Printf("TLS Certificate fingerprint for %s is: %X\n", ProxyController.CertManagerConfig.SelfcertDomain, sha256.Sum256(selfcrt.Certificate[0]))
 
 			return nil
 		},

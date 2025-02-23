@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,7 +19,6 @@ import (
 
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/agent"
-	"github.com/nicocha30/ligolo-ng/pkg/utils/selfcert"
 	"github.com/sirupsen/logrus"
 	goproxy "golang.org/x/net/proxy"
 	"nhooyr.io/websocket"
@@ -66,7 +66,7 @@ func main() {
 	}
 
 	if *bindAddr != "" {
-		selfcrt := selfcert.NewSelfCert(nil)
+		selfcrt := tlsutils.NewSelfCert(nil)
 		crt, err := selfcrt.GetCertificate(*bindAddr)
 		if err != nil {
 			logrus.Fatal(err)
