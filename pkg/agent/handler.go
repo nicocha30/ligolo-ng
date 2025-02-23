@@ -327,7 +327,7 @@ func HandleConn(conn net.Conn) {
 
 		relay.StartRelay(netConn, conn)
 
-	case *protocol.ListenerCloseResponsePacket:
+	case *protocol.AgentKillRequestPacket:
 		os.Exit(0)
 
 	}

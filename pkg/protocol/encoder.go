@@ -47,6 +47,8 @@ func payloadTypeFromInterface(payload interface{}) (uint8, error) {
 		return MessageListenerCloseRequest, nil
 	case ListenerCloseResponsePacket:
 		return MessageListenerCloseResponse, nil
+	case AgentKillRequestPacket:
+		return MessageAgentKillRequest, nil
 	case ListenerSocketConnectionReady:
 		return MessageListenerSocketConnectionReady, nil
 	default:

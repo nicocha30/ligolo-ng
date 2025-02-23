@@ -26,7 +26,7 @@ const (
 	MessageListenerSockResponse
 	MessageListenerCloseRequest
 	MessageListenerCloseResponse
-	MessageClose
+	MessageAgentKillRequest
 	MessageListenerSocketConnectionReady
 )
 
@@ -183,3 +183,6 @@ type HostPingRequestPacket struct {
 type HostPingResponsePacket struct {
 	Alive bool
 }
+
+// AgentKillRequestPacket is sent by the proxy to terminate an agent
+type AgentKillRequestPacket struct{}

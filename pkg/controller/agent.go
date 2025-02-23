@@ -27,6 +27,23 @@ func (la *LigoloAgent) Alive() bool {
 	return false
 }
 
+func (la *LigoloAgent) Kill() error {
+	// Open a new Yamux Session
+	conn, err := la.Session.Open()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	ligoloProtocol := protocol.NewEncoderDecoder(conn)
+
+	// Request to kill the agent
+	if err := ligoloProtocol.Encode(protocol.AgentKillRequestPacket{}); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (la *LigoloAgent) AddListener(addr string, network string, to string) (*proxy.LigoloListener, error) {
 	proxyListener, err := proxy.NewListener(la.Session, addr, network, to)
 	if err != nil {

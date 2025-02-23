@@ -27,7 +27,7 @@ func TestEncodeDecode(t *testing.T) {
 
 	fmt.Printf("Envelope: %+v\n", dec.Payload)
 
-	if dec.Payload.(InfoReplyPacket).Name != "hello" {
+	if dec.Payload.(*InfoReplyPacket).Name != "hello" {
 		t.Fatal("invalid packet decoded")
 	}
 

@@ -602,4 +602,21 @@ func Run() {
 			return nil
 		},
 	})
+
+	App.AddCommand(&grumble.Command{
+		Name:    "kill",
+		Help:    "Kill the current agent",
+		Usage:   "kill",
+		Aliases: []string{"agent_kill", "session_kill"},
+		Run: func(c *grumble.Context) error {
+			if _, ok := AgentList[CurrentAgentID]; !ok {
+				return ErrInvalidAgent
+			}
+			currentAgent := AgentList[CurrentAgentID]
+			if Ask("Are you sure to kill the current agent?") {
+				return currentAgent.Kill()
+			}
+			return nil
+		},
+	})
 }
