@@ -66,33 +66,7 @@ func main() {
 	}
 
 	if *bindAddr != "" {
-		selfcrt := tlsutils.NewSelfCert(nil)
-		crt, err := selfcrt.GetCertificate(*bindAddr)
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		logrus.Warnf("TLS Certificate fingerprint is: %X\n", sha256.Sum256(crt.Certificate[0]))
-		tlsConfig.GetCertificate = func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			return crt, nil
-		}
-		lis, err := net.Listen("tcp", *bindAddr)
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		logrus.Infof("Listening on %s...", *bindAddr)
-		for {
-			conn, err := lis.Accept()
-			if err != nil {
-				logrus.Error(err)
-				continue
-			}
-			logrus.Infof("Got connection from: %s\n", conn.RemoteAddr())
-			tlsConn := tls.Server(conn, &tlsConfig)
-
-			if err := connect(tlsConn); err != nil {
-				logrus.Error(err)
-			}
-		}
+		bind(&tlsConfig, *bindAddr)
 	}
 
 	if *serverAddr == "" {
@@ -200,6 +174,36 @@ func connect(conn net.Conn) error {
 			return err
 		}
 		go agent.HandleConn(conn)
+	}
+}
+
+func bind(config *tls.Config, bindAddr string) {
+	selfcrt := tlsutils.NewSelfCert(nil)
+	crt, err := selfcrt.GetCertificate(bindAddr)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	logrus.Warnf("TLS Certificate fingerprint is: %X\n", sha256.Sum256(crt.Certificate[0]))
+	config.GetCertificate = func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return crt, nil
+	}
+	lis, err := net.Listen("tcp", bindAddr)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	logrus.Infof("Listening on %s...", bindAddr)
+	for {
+		conn, err := lis.Accept()
+		if err != nil {
+			logrus.Error(err)
+			continue
+		}
+		logrus.Infof("Got connection from: %s\n", conn.RemoteAddr())
+		tlsConn := tls.Server(conn, config)
+
+		if err := connect(tlsConn); err != nil {
+			logrus.Error(err)
+		}
 	}
 }
 
