@@ -180,6 +180,13 @@ func InitConfig(configFile string) {
 	Config.SetDefault("web.behindreverseproxy", false)
 	Config.SetDefault("web.users", map[string]string{"ligolo": "password"})
 	Config.SetDefault("web.trustedproxies", []string{"127.0.0.1"})
+	Config.SetDefault("web.tls.enabled", false)
+	Config.SetDefault("web.tls.selfcert", false)
+	Config.SetDefault("web.tls.autocert", false)
+	Config.SetDefault("web.tls.certfile", "")
+	Config.SetDefault("web.tls.keyfile", "")
+	Config.SetDefault("web.tls.alloweddomains", []string{})
+	Config.SetDefault("web.tls.selfcertdomain", "ligolo")
 	secureConfigPasswords()
 
 	secret, err := generateRandomBytes(32)

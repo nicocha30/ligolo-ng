@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/nicocha30/ligolo-ng/cmd/proxy/config"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo"
+	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
 	"github.com/sirupsen/logrus"
 	"net/http"
 	"strconv"
@@ -364,5 +365,34 @@ func StartLigoloApi() {
 		go StartTunnel(CurrentAgent, tunnelRequest.Interface)
 		c.JSON(http.StatusOK, gin.H{"message": "tunnel starting"})
 	})
-	r.Run(config.Config.GetString("web.listen")) // listen and serve on 0.0.0.0:8080
+
+	if config.Config.GetBool("web.tls.enabled") {
+		// create tls config
+		tlsConfig, err := tlsutils.CertManager(&tlsutils.CertManagerConfig{
+			EnableAutocert:  config.Config.GetBool("web.tls.autocert"),
+			DomainWhitelist: config.Config.GetStringSlice("web.tls.alloweddomains"),
+			EnableSelfcert:  config.Config.GetBool("web.tls.selfcert"),
+			SelfCertCache:   "ligolo-selfcerts",
+			SelfcertDomain:  config.Config.GetString("web.tls.selfcertdomain"),
+			Certfile:        config.Config.GetString("web.tls.certfile"),
+			Keyfile:         config.Config.GetString("web.tls.keyfile"),
+		})
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		server := http.Server{
+			Addr:      config.Config.GetString("web.listen"),
+			Handler:   r,
+			TLSConfig: tlsConfig,
+		}
+		// start tls server
+		if err := server.ListenAndServeTLS("", ""); err != nil {
+			logrus.Fatal(err)
+		}
+	} else {
+		// listen and serve on 0.0.0.0:8080
+		if err := r.Run(config.Config.GetString("web.listen")); err != nil {
+			logrus.Fatal(err)
+		}
+	}
 }
