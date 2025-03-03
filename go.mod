@@ -1,8 +1,8 @@
 module github.com/nicocha30/ligolo-ng
 
-go 1.21.0
+go 1.23.0
 
-toolchain go1.22.9
+toolchain go1.23.4
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.3.5
@@ -11,7 +11,7 @@ require (
 	github.com/hashicorp/yamux v0.1.0
 	github.com/jedib0t/go-pretty/v6 v6.3.5
 	github.com/sirupsen/logrus v1.9.3
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.34.0
 	golang.org/x/net v0.35.0
 	golang.zx2c4.com/wintun v0.0.0-20211104114900-415007cec224
 	golang.zx2c4.com/wireguard v0.0.0-20220703234212-c31a7b1ab478

@@ -3,7 +3,6 @@ package netinfo
 import (
 	"errors"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo/winroute"
-	"golang.zx2c4.com/wintun"
 	"net"
 )
 
@@ -12,12 +11,10 @@ type Tun struct {
 	name string
 }
 
+/*
+The Wintun driver is not made for persistent interfaces.
+*/
 func CreateTUN(name string) error {
-	/*_, err := tun.CreateTUN(name, 1500)
-	if err != nil {
-		return err
-	}*/
-
 	return errors.New("tun should be created when starting tunnel")
 }
 

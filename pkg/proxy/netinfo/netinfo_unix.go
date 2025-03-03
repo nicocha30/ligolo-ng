@@ -19,11 +19,6 @@ type Tun struct {
 }
 
 func CreateTUN(name string) error {
-	/*_, err := tun.CreateTUN(name, 1500)
-	if err != nil {
-		return err
-	}*/
-
 	return errors.New("tun should be created when starting tunnel")
 }
 

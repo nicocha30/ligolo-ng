@@ -10,8 +10,7 @@ import (
 
 // interface.name config
 type InterfaceConfig struct {
-	Enabled bool
-	Routes  []string
+	Routes []string
 }
 
 type InterfaceRoute struct {
@@ -93,6 +92,7 @@ func GetInterfaceConfigState() (map[string]InterfaceInfo, error) {
 		interfaces[tuntap.Name()] = ifInfo
 	}
 
+	// Read interfaces from the configuration file
 	var ifaceInfo map[string]InterfaceConfig
 	Config.UnmarshalKey("interface", &ifaceInfo)
 
@@ -153,10 +153,15 @@ func DeleteRouteConfig(ifName string, routeCidr string) error {
 }
 
 func AddInterfaceConfig(ifName string) error {
-	configPath := fmt.Sprintf("interface.%s", ifName)
-	Config.Set(configPath, true)
-	configRoutePath := fmt.Sprintf("interface.%s.routes", ifName)
-	Config.Set(configRoutePath, []string{})
+	var ifaceInfo map[string]InterfaceConfig
+	// Unmarshal current interfaces config
+	Config.UnmarshalKey("interface", &ifaceInfo)
+	// Add an entry
+	ifaceInfo[ifName] = InterfaceConfig{
+		Routes: nil,
+	}
+	// Update the config
+	Config.Set("interface", ifaceInfo)
 	if err := Config.WriteConfig(); err != nil {
 		return err
 	}
