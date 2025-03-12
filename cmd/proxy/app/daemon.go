@@ -3,10 +3,12 @@ package app
 import (
 	"fmt"
 	"github.com/gin-contrib/cors"
+	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 	"github.com/nicocha30/ligolo-ng/cmd/proxy/config"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo"
 	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
+	"github.com/nicocha30/ligolo-ng/web"
 	"github.com/sirupsen/logrus"
 	"net/http"
 	"strconv"
@@ -74,6 +76,10 @@ func StartLigoloApi() {
 		logrus.Fatal(err)
 	}
 	r.ForwardedByClientIP = config.Config.GetBool("web.behindreverseproxy")
+
+	if config.Config.GetBool("web.enableui") {
+		r.Use(static.Serve("/", static.EmbedFolder(web.LigoloWebFS, "dist")))
+	}
 
 	r.POST("/auth", func(c *gin.Context) {
 		type AuthInfo struct {
@@ -160,13 +166,13 @@ func StartLigoloApi() {
 		}
 		if err := config.AddInterfaceConfig(interfaceInfo.Interface); err != nil {
 			c.Error(err)
-			c.JSON(http.StatusInternalServerError, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 			return
 		}
 		if netinfo.CanCreateTUNs() {
 			if err := netinfo.CreateTUN(interfaceInfo.Interface); err != nil {
 				c.Error(err)
-				c.JSON(http.StatusInternalServerError, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Interface %s created.", interfaceInfo.Interface)})
@@ -178,34 +184,39 @@ func StartLigoloApi() {
 	r.POST("/routes", func(c *gin.Context) {
 		type RouteInfo struct {
 			Interface string
-			Route     string
+			Route     []string
 		}
 		var routeInfo RouteInfo
 		if err := c.ShouldBindJSON(&routeInfo); err != nil {
 			c.JSON(http.StatusInternalServerError, inputError)
 			return
 		}
-		if err := config.AddRouteConfig(routeInfo.Interface, routeInfo.Route); err != nil {
-			c.Error(err)
-			c.JSON(http.StatusInternalServerError, err)
-			return
+		for _, route := range routeInfo.Route {
+			if err := config.AddRouteConfig(routeInfo.Interface, route); err != nil {
+				c.Error(err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+				return
+			}
 		}
+
 		if netinfo.InterfaceExist(routeInfo.Interface) {
 			stun, err := netinfo.GetTunByName(routeInfo.Interface)
 			if err != nil {
 				c.Error(err)
-				c.JSON(http.StatusInternalServerError, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 				return
 			}
-			if err := stun.AddRoute(routeInfo.Route); err != nil {
-				c.Error(err)
-				c.JSON(http.StatusInternalServerError, err)
-				return
+			for _, route := range routeInfo.Route {
+				if err := stun.AddRoute(route); err != nil {
+					c.Error(err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+					return
+				}
 			}
-			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Route %s added.", routeInfo.Route)})
+			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Routes %s added.", routeInfo.Route)})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Route %s will be created on tunnel start.", routeInfo.Route)})
+		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Routes %s will be created on tunnel start.", routeInfo.Route)})
 		return
 	})
 
@@ -221,19 +232,19 @@ func StartLigoloApi() {
 		}
 		if err := config.DeleteRouteConfig(routeInfo.Interface, routeInfo.Route); err != nil {
 			c.Error(err)
-			c.JSON(http.StatusInternalServerError, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 			return
 		}
 		if netinfo.InterfaceExist(routeInfo.Interface) {
 			stun, err := netinfo.GetTunByName(routeInfo.Interface)
 			if err != nil {
 				c.Error(err)
-				c.JSON(http.StatusInternalServerError, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 				return
 			}
 			if err := stun.DelRoute(routeInfo.Route); err != nil {
 				c.Error(err)
-				c.JSON(http.StatusInternalServerError, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Route %s deleted.", routeInfo.Route)})
@@ -282,7 +293,7 @@ func StartLigoloApi() {
 		var listenerDeleteRequest ListenerDeleteRequest
 		if err := c.ShouldBindJSON(&listenerDeleteRequest); err != nil {
 			c.Error(err)
-			c.JSON(http.StatusInternalServerError, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 			return
 		}
 		if _, ok := AgentList[listenerDeleteRequest.AgentID]; !ok {
@@ -312,7 +323,7 @@ func StartLigoloApi() {
 		}
 		if _, err := AgentList[listenerRequest.AgentID].AddListener(listenerRequest.ListenerAddr, listenerRequest.Network, listenerRequest.RedirectAddr); err != nil {
 			c.Error(err)
-			c.JSON(http.StatusInternalServerError, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 			return
 		}
 	})
