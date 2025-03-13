@@ -68,7 +68,9 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 			recovered = true
 			registeredAgents.Session = agent.Session
 			if registeredAgents.Running {
-				go StartTunnel(registeredAgents, registeredAgents.Interface)
+				if err := StartTunnel(registeredAgents, registeredAgents.Interface); err != nil {
+					logrus.Errorf("unable to start tunnel recovery for agent %s: %v", agent.SessionID, err)
+				}
 			}
 
 			for lid, listener := range registeredAgents.Listeners {
@@ -103,7 +105,9 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 		if config.Config.GetBool(fmt.Sprintf("agent.%s.autobind", agent.SessionID)) {
 			autobindInterface := config.Config.GetString(fmt.Sprintf("agent.%s.interface", agent.SessionID))
 			logrus.Infof("Starting autobind session: %s on interface %s", agent.SessionID, autobindInterface)
-			go StartTunnel(agent, autobindInterface)
+			if err := StartTunnel(agent, autobindInterface); err != nil {
+				logrus.Error("unable to start tunnel for autobind: ", err)
+			}
 		}
 	}
 	AgentCounter++
@@ -111,15 +115,14 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 	return nil
 }
 
-func StartTunnel(agent *controller.LigoloAgent, tunName string) {
+func StartTunnel(agent *controller.LigoloAgent, tunName string) error {
 	configState, err := config.GetInterfaceConfigState()
 	if err != nil {
-		logrus.Error(err)
-		return
+		return err
 	}
 	if ifaceConfig, ok := configState[tunName]; ok {
 		if runtime.GOOS == "linux" && !ifaceConfig.Active {
-			logrus.Infof("Creating tun interface %s", tunName)
+			logrus.Debugf("Creating tun interface %s", tunName)
 			if err := netinfo.CreateTUN(tunName); err != nil {
 				logrus.Error(err)
 			}
@@ -132,20 +135,21 @@ func StartTunnel(agent *controller.LigoloAgent, tunName string) {
 		MaxInflight: 4096,
 	})
 	if err != nil {
-		logrus.Error("Unable to create tunnel, err:", err)
-		return
+		return err
 	}
 
 	if ifaceConfig, ok := configState[tunName]; ok {
 		for _, ifcfg := range ifaceConfig.Routes {
 			if !ifcfg.Active {
-				logrus.Infof("Creating route %s on interface %s", tunName, ifcfg.Destination)
+				logrus.Debugf("Creating route %s on interface %s", tunName, ifcfg.Destination)
 				tun, err := netinfo.GetTunByName(tunName)
 				if err != nil {
 					logrus.Error(err)
-					continue
+					return err
 				}
-				tun.AddRoute(ifcfg.Destination)
+				if err := tun.AddRoute(ifcfg.Destination); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -159,30 +163,36 @@ func StartTunnel(agent *controller.LigoloAgent, tunName string) {
 	agent.Running = true
 
 	ctx, cancelTunnel := context.WithCancel(context.Background())
+	// Handle packets
 	go ligoloStack.HandleSession(agent.Session, ctx)
 
-	for {
-		select {
-		case <-agent.CloseChan: // User stopped
-			logrus.Infof("Closing tunnel to %s (%s)...", agent.Name, agent.SessionID)
-			cancelTunnel()
-			return
-		case <-agent.Session.CloseChan(): // Agent closed
-			logrus.Warnf("Lost tunnel connection with agent %s (%s)!", agent.Name, agent.SessionID)
-			//agent.Running = false
-			//agent.Session = nil
+	// Watchdog
+	go func() {
+		for {
+			select {
+			case <-agent.CloseChan: // User stopped
+				logrus.Infof("Closing tunnel to %s (%s)...", agent.Name, agent.SessionID)
+				cancelTunnel()
+				return
+			case <-agent.Session.CloseChan(): // Agent closed
+				logrus.Warnf("Lost tunnel connection with agent %s (%s)!", agent.Name, agent.SessionID)
+				//agent.Running = false
+				//agent.Session = nil
 
-			if currentAgent, ok := AgentList[CurrentAgentID]; ok {
-				if currentAgent.SessionID == agent.SessionID {
-					App.SetDefaultPrompt()
-					agent.Session = nil
+				if currentAgent, ok := AgentList[CurrentAgentID]; ok {
+					if currentAgent.SessionID == agent.SessionID {
+						App.SetDefaultPrompt()
+						agent.Session = nil
+					}
 				}
-			}
 
-			cancelTunnel()
-			return
+				cancelTunnel()
+				return
+			}
 		}
-	}
+	}()
+
+	return nil
 }
 
 func Run() {
@@ -339,7 +349,9 @@ func Run() {
 				}
 			}
 
-			go StartTunnel(CurrentAgent, c.Flags.String("tun"))
+			if err := StartTunnel(CurrentAgent, c.Flags.String("tun")); err != nil {
+				return fmt.Errorf("unable to start tunnel: %s", err.Error())
+			}
 
 			return nil
 		},

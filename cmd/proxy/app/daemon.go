@@ -10,7 +10,9 @@ import (
 	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
 	"github.com/nicocha30/ligolo-ng/web"
 	"github.com/sirupsen/logrus"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 )
@@ -59,6 +61,16 @@ func StartLigoloApi() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	logrus.Warn("Ligolo-ng API is experimental, and should be running behind a reverse-proxy if publicly exposed.")
+
+	if config.Config.GetString("web.logfile") != "" {
+		f, err := os.Create(config.Config.GetString("web.logfile"))
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		gin.DisableConsoleColor()
+		gin.DefaultWriter = io.MultiWriter(f)
+	}
+
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
@@ -166,13 +178,13 @@ func StartLigoloApi() {
 		}
 		if err := config.AddInterfaceConfig(interfaceInfo.Interface); err != nil {
 			c.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		if netinfo.CanCreateTUNs() {
 			if err := netinfo.CreateTUN(interfaceInfo.Interface); err != nil {
 				c.Error(err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Interface %s created.", interfaceInfo.Interface)})
@@ -194,7 +206,7 @@ func StartLigoloApi() {
 		for _, route := range routeInfo.Route {
 			if err := config.AddRouteConfig(routeInfo.Interface, route); err != nil {
 				c.Error(err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 		}
@@ -203,13 +215,13 @@ func StartLigoloApi() {
 			stun, err := netinfo.GetTunByName(routeInfo.Interface)
 			if err != nil {
 				c.Error(err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 			for _, route := range routeInfo.Route {
 				if err := stun.AddRoute(route); err != nil {
 					c.Error(err)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 					return
 				}
 			}
@@ -232,19 +244,19 @@ func StartLigoloApi() {
 		}
 		if err := config.DeleteRouteConfig(routeInfo.Interface, routeInfo.Route); err != nil {
 			c.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		if netinfo.InterfaceExist(routeInfo.Interface) {
 			stun, err := netinfo.GetTunByName(routeInfo.Interface)
 			if err != nil {
 				c.Error(err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 			if err := stun.DelRoute(routeInfo.Route); err != nil {
 				c.Error(err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Route %s deleted.", routeInfo.Route)})
@@ -293,7 +305,7 @@ func StartLigoloApi() {
 		var listenerDeleteRequest ListenerDeleteRequest
 		if err := c.ShouldBindJSON(&listenerDeleteRequest); err != nil {
 			c.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		if _, ok := AgentList[listenerDeleteRequest.AgentID]; !ok {
@@ -323,7 +335,7 @@ func StartLigoloApi() {
 		}
 		if _, err := AgentList[listenerRequest.AgentID].AddListener(listenerRequest.ListenerAddr, listenerRequest.Network, listenerRequest.RedirectAddr); err != nil {
 			c.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 	})
@@ -373,7 +385,10 @@ func StartLigoloApi() {
 			return
 		}
 		CurrentAgent := AgentList[tunnelId]
-		go StartTunnel(CurrentAgent, tunnelRequest.Interface)
+		if err := StartTunnel(CurrentAgent, tunnelRequest.Interface); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "tunnel starting"})
 	})
 

@@ -350,7 +350,9 @@ func init() {
 			survey.AskOne(prompt, &startTunnel)
 
 			if startTunnel {
-				go StartTunnel(CurrentAgent, selectedIface)
+				if err := StartTunnel(CurrentAgent, selectedIface); err != nil {
+					return fmt.Errorf("unable to start tunnel: %v", err)
+				}
 			} else {
 				logrus.Infof("You can start the tunnel with: start --tun %s", selectedIface)
 			}
