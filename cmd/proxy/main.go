@@ -34,6 +34,7 @@ func main() {
 	var versionFlag = flag.Bool("version", false, "show the current version")
 	var hideBanner = flag.Bool("nobanner", false, "don't show banner on startup")
 	var configFile = flag.String("config", "", "the config file to use")
+	var daemonMode = flag.Bool("daemon", false, "run as daemon mode (no CLI)")
 
 	flag.Usage = func() {
 		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
@@ -62,7 +63,7 @@ func main() {
 		allowDomains = strings.Split(*domainWhitelist, ",")
 	}
 
-	if !*hideBanner {
+	if !*hideBanner && !*daemonMode {
 		app.App.SetPrintASCIILogo(func(a *grumble.App) {
 			a.Println("    __    _             __                       ")
 			a.Println("   / /   (_)___ _____  / /___        ____  ____ _")
@@ -140,12 +141,21 @@ func main() {
 		}
 	}()
 
+	if *daemonMode && !config.Config.GetBool("web.enabled") {
+		logrus.Warning("daemon mode enabled but web.enabled is false!")
+	}
+
 	if config.Config.GetBool("web.enabled") {
-		logrus.Info("Starting Ligolo-ng Web")
+		logrus.Infof("Starting Ligolo-ng Web, API URL is set to: %s", app.GetAPIUrl())
 		go app.StartLigoloApi()
 	}
 
-	// Grumble doesn't like cli args
-	os.Args = []string{}
-	grumble.Main(app.App)
+	if *daemonMode {
+		proxyController.WaitForFinished()
+	} else {
+		// Grumble doesn't like cli args
+		os.Args = []string{}
+		grumble.Main(app.App)
+	}
+
 }

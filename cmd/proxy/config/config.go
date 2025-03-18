@@ -156,6 +156,7 @@ func InitConfig(configFile string) {
 	Config.AddConfigPath("$HOME/.ligolo-proxy")
 	Config.AddConfigPath("/etc/ligolo-proxy")
 
+	logrus.Infof("Loading configuration file %s", configFile)
 	if err := Config.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			logrus.Warn("daemon configuration file not found. Creating a new one...")
@@ -198,7 +199,7 @@ func InitConfig(configFile string) {
 	Config.SetDefault("web.secret", hex.EncodeToString(secret))
 
 	if firstStart {
-		Config.SetDefault("interface.ligolo.routes", []string{"10.254.0.0/24", "10.255.0.0/24"})
+		Config.SetDefault("interface.ligolosample.routes", []string{"10.254.0.0/24", "10.255.0.0/24"})
 		Config.SetDefault("agent.deadbeefcafe.interface", "ligolo")
 		Config.SetDefault("agent.deadbeefcafe.autobind", false)
 	}

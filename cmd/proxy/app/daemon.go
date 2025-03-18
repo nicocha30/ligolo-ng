@@ -54,6 +54,15 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
+func GetAPIUrl() string {
+	targetDomain := config.Config.GetString("web.listen")
+	scheme := "http"
+	if config.Config.GetBool("web.tls.enabled") {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s", scheme, targetDomain)
+}
+
 func StartLigoloApi() {
 	if config.Config.GetBool("web.debug") {
 		gin.SetMode(gin.DebugMode)

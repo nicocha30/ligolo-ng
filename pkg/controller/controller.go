@@ -16,6 +16,7 @@ type Controller struct {
 	Network    string
 	Connection chan net.Conn
 	startchan  chan error
+	donechan   chan error
 	ControllerConfig
 }
 
@@ -31,6 +32,10 @@ func New(config ControllerConfig) Controller {
 
 func (c *Controller) WaitForReady() error {
 	return <-c.startchan
+}
+
+func (c *Controller) WaitForFinished() error {
+	return <-c.donechan
 }
 
 func (c *Controller) GetSelfCertificateSignature() (*tls.Certificate, error) {
@@ -91,4 +96,5 @@ func (c *Controller) ListenAndServe() {
 			c.Connection <- conn
 		}
 	}
+	c.donechan <- nil
 }
