@@ -176,7 +176,7 @@ func InitConfig(configFile string) {
 
 	Config.SetDefault("web.enabled", false)
 	Config.SetDefault("web.enableui", true)
-	Config.SetDefault("web.listen", ":8080")
+	Config.SetDefault("web.listen", "127.0.0.1:8080")
 	Config.SetDefault("web.corsAllowedOrigin", []string{"https://webui.ligolo.ng"})
 	Config.SetDefault("web.debug", false)
 	Config.SetDefault("web.logfile", "ui.log")
