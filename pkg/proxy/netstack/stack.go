@@ -182,7 +182,7 @@ func (s *NetStack) new(stackSettings StackSettings) (*stack.Stack, error) {
 
 	iface, err := tun.New(stackSettings.TunName)
 	if err != nil {
-		return nil, fmt.Errorf("unable to open tun interface '%s' (tun.New %v), make sure you've created the tun interface and that it's not in use", stackSettings.TunName, err)
+		return nil, fmt.Errorf("unable to open tun interface '%s' (tun.New %v)", stackSettings.TunName, err)
 	}
 	s.iface = iface
 

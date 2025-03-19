@@ -119,17 +119,24 @@ func GetInterfaceConfigState() (map[string]InterfaceInfo, error) {
 }
 
 func AddRouteConfig(ifName string, routeCidr string) error {
-	// Get current iface config
-	configPath := fmt.Sprintf("interface.%s.routes", ifName)
-	currentRoutes := Config.GetStringSlice(configPath)
-	if slices.Contains(currentRoutes, routeCidr) {
-		// Route already exists
-		return nil
+	var ifaceInfo map[string]InterfaceConfig
+	// Unmarshal current interfaces config
+	Config.UnmarshalKey("interface", &ifaceInfo)
+
+	// Sanity check
+	if _, ok := ifaceInfo[ifName]; !ok {
+		return fmt.Errorf("interface %s not found", ifName)
 	}
-	// Add route to config
-	currentRoutes = append(currentRoutes, routeCidr)
-	Config.Set(configPath, currentRoutes)
-	// Save config
+	if slices.Contains(ifaceInfo[ifName].Routes, routeCidr) {
+		// Route already exists
+		return fmt.Errorf("route %s already exists", routeCidr)
+	}
+	// Add an entry
+	ifaceInfo[ifName] = InterfaceConfig{
+		Routes: append(ifaceInfo[ifName].Routes, routeCidr),
+	}
+	// Update the config
+	Config.Set("interface", ifaceInfo)
 	if err := Config.WriteConfig(); err != nil {
 		return err
 	}
@@ -137,15 +144,23 @@ func AddRouteConfig(ifName string, routeCidr string) error {
 }
 
 func DeleteRouteConfig(ifName string, routeCidr string) error {
-	configPath := fmt.Sprintf("interface.%s.routes", ifName)
-	currentRoutes := Config.GetStringSlice(configPath)
-	var newRoutes []string
-	for _, route := range currentRoutes {
+	var ifaceInfo map[string]InterfaceConfig
+	// Unmarshal current interfaces config
+	Config.UnmarshalKey("interface", &ifaceInfo)
+	// Sanity check
+	if _, ok := ifaceInfo[ifName]; !ok {
+		return fmt.Errorf("interface %s not found", ifName)
+	}
+	// Build the new routing table
+	var newRouteTable []string
+	for _, route := range ifaceInfo[ifName].Routes {
 		if route != routeCidr {
-			newRoutes = append(newRoutes, route)
+			newRouteTable = append(newRouteTable, route)
 		}
 	}
-	Config.Set(configPath, newRoutes)
+	ifaceInfo[ifName] = InterfaceConfig{Routes: newRouteTable}
+	// Update the config
+	Config.Set("interface", ifaceInfo)
 	if err := Config.WriteConfig(); err != nil {
 		return err
 	}

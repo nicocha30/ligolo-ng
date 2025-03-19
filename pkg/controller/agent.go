@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/protocol"
@@ -45,6 +46,12 @@ func (la *LigoloAgent) Kill() error {
 }
 
 func (la *LigoloAgent) AddListener(addr string, network string, to string) (*proxy.LigoloListener, error) {
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return nil, fmt.Errorf("invalid listener addr: %v", err)
+	}
+	if _, _, err := net.SplitHostPort(to); err != nil {
+		return nil, fmt.Errorf("invalid redirect addr: %v", err)
+	}
 	proxyListener, err := proxy.NewListener(la.Session, addr, network, to)
 	if err != nil {
 		return nil, err

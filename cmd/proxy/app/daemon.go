@@ -88,10 +88,7 @@ func StartLigoloApi() {
 		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
-		AllowOriginFunc: func(origin string) bool {
-			return true
-		},
-		MaxAge: 12 * time.Hour,
+		MaxAge:           12 * time.Hour,
 	}))
 	if err := r.SetTrustedProxies(config.Config.GetStringSlice("web.trustedproxies")); err != nil {
 		logrus.Fatal(err)
@@ -173,7 +170,7 @@ func StartLigoloApi() {
 				return
 			}
 		}
-
+		c.JSON(http.StatusOK, gin.H{"message": "interface deleted"})
 	})
 
 	r.POST("/interfaces", func(c *gin.Context) {
@@ -303,7 +300,7 @@ func StartLigoloApi() {
 				})
 			}
 		}
-		c.JSON(http.StatusOK, listeners)
+		c.IndentedJSON(http.StatusOK, listeners)
 	})
 
 	r.DELETE("/listeners", func(c *gin.Context) {
@@ -347,10 +344,11 @@ func StartLigoloApi() {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		c.JSON(http.StatusOK, gin.H{"message": "listener created"})
 	})
 
 	r.GET("/agents", func(c *gin.Context) {
-		c.JSON(http.StatusOK, AgentList)
+		c.IndentedJSON(http.StatusOK, AgentList)
 	})
 
 	r.DELETE("/tunnel/:id", func(c *gin.Context) {
@@ -372,6 +370,7 @@ func StartLigoloApi() {
 		}
 		CurrentAgent.CloseChan <- true
 		CurrentAgent.Running = false
+		c.JSON(http.StatusOK, gin.H{"message": "tunnel stopping"})
 	})
 
 	r.POST("/tunnel/:id", func(c *gin.Context) {
