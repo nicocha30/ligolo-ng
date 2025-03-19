@@ -171,6 +171,10 @@ func AddInterfaceConfig(ifName string) error {
 	var ifaceInfo map[string]InterfaceConfig
 	// Unmarshal current interfaces config
 	Config.UnmarshalKey("interface", &ifaceInfo)
+	// Check if empty interface
+	if ifaceInfo == nil {
+		ifaceInfo = make(map[string]InterfaceConfig)
+	}
 	// Add an entry
 	ifaceInfo[ifName] = InterfaceConfig{
 		Routes: nil,
