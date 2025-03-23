@@ -3,6 +3,7 @@ package netinfo
 import (
 	"errors"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo/winroute"
+	"golang.zx2c4.com/wintun"
 	"net"
 )
 

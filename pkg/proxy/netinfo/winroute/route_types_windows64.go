@@ -14,7 +14,7 @@
 
 // Code from https://github.com/GoogleCloudPlatform/google-guest-agent
 
-//go:build amd64 && windows
+//go:build (amd64 || arm64) && windows
 
 package winroute
 

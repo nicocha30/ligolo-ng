@@ -1,4 +1,8 @@
+version: 2
 project_name: ligolo-ng
+before:
+  hooks:
+    - go generate ./...
 builds:
   - main: ./cmd/agent
     id: "agent"
@@ -42,14 +46,14 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: ['zip']
   - 
     id: "agent"
     builds: ['agent']
     name_template: "{{ .ProjectName }}_{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: ['zip']
 release:
   github:
   disable: false
