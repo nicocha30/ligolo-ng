@@ -11,13 +11,14 @@ An advanced, yet simple, tunneling tool that uses TUN interfaces.
 
 [📑 Ligolo-ng Documentation (Setup/Quickstart)](https://github.com/nicocha30/ligolo-ng/wiki)
 
-You use Ligolo-ng for your penetration tests? Did it help you pass a certification? Please consider sponsoring the project so I can buy my team some drinks. ☕
-
-[:heart: Sponsor nicocha30](https://github.com/sponsors/nicocha30)
-
-We would like to thank the following people for their support in the development of Ligolo-ng.
-
-<!-- sponsors --><a href="https://github.com/OSCPL-byte"><img src="https://github.com/OSCPL-byte.png" width="50px" alt="OSCPL-byte" /></a>&nbsp;&nbsp;<a href="https://github.com/scmanjarrez"><img src="https://github.com/scmanjarrez.png" width="50px" alt="scmanjarrez" /></a>&nbsp;&nbsp;<!-- sponsors -->
+> [!TIP]
+> Ligolo-ng 0.8 added a lot of new features, including:
+> - 🌐 API and a beautiful Web Interface thanks to [L'ami du Raisin](https://github.com/jeremiebedjai), allowing multiplayer
+> - ⚙️ Simple configuration file, to keep your tunneling/proxy settings
+> - 🚦 Daemon mode, to run Ligolo-ng as a service
+> - 🔗 Auto-bind, to automatically configure tunneling whenever a specific agent connects
+> - 📶 Easy and automatic (autoroute) route and interface management on Windows, Linux, MacOS and BSD!
+> - 💀 Agent kill, to remotely terminate an agent
 
 ## Table of Contents
 
@@ -80,7 +81,7 @@ This allows running tools like *nmap* without the use of *proxychains* (simpler 
 
 ## How to use - documentation - tutorial
 
-You will find the documentation for Ligolo-ng, as well as the steps to follow to get it up and running on the [Ligolo-ng Wiki](https://github.com/nicocha30/ligolo-ng/wiki)
+You will find the documentation for Ligolo-ng, as well as the steps to follow to get it up and running on the [Ligolo-ng Wiki](https://docs.ligolo.ng)
 
 ## Does it require Administrator/root access ?
 
