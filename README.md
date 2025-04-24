@@ -19,6 +19,7 @@ An advanced, yet simple, tunneling tool that uses TUN interfaces.
 > - 🔗 Auto-bind, to automatically configure tunneling whenever a specific agent connects
 > - 📶 Easy and automatic (autoroute) route and interface management on Windows, Linux, MacOS and BSD!
 > - 💀 Agent kill, to remotely terminate an agent
+> ![Ligolo Web](doc/webui.png)
 
 ## Table of Contents
 
@@ -135,3 +136,4 @@ When using *nmap*, you should use `--unprivileged` or `-PE` to avoid false posit
 ## Credits
 
 - Nicolas Chatelain <nicolas -at- chatelain.me>
+- Jeremie Bedjai (Ligolo-ng-Web)

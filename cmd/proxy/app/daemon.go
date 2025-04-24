@@ -96,10 +96,15 @@ func StartLigoloApi() {
 	r.ForwardedByClientIP = config.Config.GetBool("web.behindreverseproxy")
 
 	if config.Config.GetBool("web.enableui") {
-		r.Use(static.Serve("/", static.EmbedFolder(web.LigoloWebFS, "dist")))
+		eFs, err := static.EmbedFolder(web.LigoloWebFS, "dist")
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		r.Use(static.Serve("/ui", eFs))
+		r.NoRoute()
 	}
 
-	r.POST("/auth", func(c *gin.Context) {
+	r.POST("/api/auth", func(c *gin.Context) {
 		type AuthInfo struct {
 			Username string
 			Password string
@@ -126,279 +131,280 @@ func StartLigoloApi() {
 		c.JSON(http.StatusOK, gin.H{"token": signedJwt})
 	})
 
-	r.Use(authMiddleware())
-
-	r.GET("/ping", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "pong",
+	apiv1 := r.Group("/api/v1").Use(authMiddleware())
+	{
+		apiv1.GET("/ping", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"message": "pong",
+			})
 		})
-	})
 
-	r.GET("/interfaces", func(c *gin.Context) {
-		interfaces, err := config.GetInterfaceConfigState()
-		if err != nil {
-			c.Error(err)
-			c.JSON(http.StatusInternalServerError, internalServerError)
-			return
-		}
-
-		c.IndentedJSON(http.StatusOK, interfaces)
-	})
-
-	r.DELETE("/interfaces", func(c *gin.Context) {
-		type InterfaceInfo struct {
-			Interface string
-		}
-		var interfaceInfo InterfaceInfo
-		if err := c.ShouldBindJSON(&interfaceInfo); err != nil {
-			c.JSON(http.StatusInternalServerError, inputError)
-			return
-		}
-		if err := config.DeleteInterfaceConfig(interfaceInfo.Interface); err != nil {
-			c.Error(err)
-		}
-		if netinfo.InterfaceExist(interfaceInfo.Interface) {
-			stun, err := netinfo.GetTunByName(interfaceInfo.Interface)
+		apiv1.GET("/interfaces", func(c *gin.Context) {
+			interfaces, err := config.GetInterfaceConfigState()
 			if err != nil {
 				c.Error(err)
 				c.JSON(http.StatusInternalServerError, internalServerError)
 				return
 			}
-			if err := stun.Destroy(); err != nil {
-				c.Error(err)
-				c.JSON(http.StatusInternalServerError, internalServerError)
+
+			c.IndentedJSON(http.StatusOK, interfaces)
+		})
+
+		apiv1.DELETE("/interfaces", func(c *gin.Context) {
+			type InterfaceInfo struct {
+				Interface string
+			}
+			var interfaceInfo InterfaceInfo
+			if err := c.ShouldBindJSON(&interfaceInfo); err != nil {
+				c.JSON(http.StatusInternalServerError, inputError)
 				return
 			}
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "interface deleted"})
-	})
+			if err := config.DeleteInterfaceConfig(interfaceInfo.Interface); err != nil {
+				c.Error(err)
+			}
+			if netinfo.InterfaceExist(interfaceInfo.Interface) {
+				stun, err := netinfo.GetTunByName(interfaceInfo.Interface)
+				if err != nil {
+					c.Error(err)
+					c.JSON(http.StatusInternalServerError, internalServerError)
+					return
+				}
+				if err := stun.Destroy(); err != nil {
+					c.Error(err)
+					c.JSON(http.StatusInternalServerError, internalServerError)
+					return
+				}
+			}
+			c.JSON(http.StatusOK, gin.H{"message": "interface deleted"})
+		})
 
-	r.POST("/interfaces", func(c *gin.Context) {
-		type InterfaceInfo struct {
-			Interface string
-		}
-		var interfaceInfo InterfaceInfo
-		if err := c.ShouldBindJSON(&interfaceInfo); err != nil {
-			c.JSON(http.StatusInternalServerError, inputError)
-			return
-		}
-		if err := config.AddInterfaceConfig(interfaceInfo.Interface); err != nil {
-			c.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if netinfo.CanCreateTUNs() {
-			if err := netinfo.CreateTUN(interfaceInfo.Interface); err != nil {
+		apiv1.POST("/interfaces", func(c *gin.Context) {
+			type InterfaceInfo struct {
+				Interface string
+			}
+			var interfaceInfo InterfaceInfo
+			if err := c.ShouldBindJSON(&interfaceInfo); err != nil {
+				c.JSON(http.StatusInternalServerError, inputError)
+				return
+			}
+			if err := config.AddInterfaceConfig(interfaceInfo.Interface); err != nil {
 				c.Error(err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Interface %s created.", interfaceInfo.Interface)})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Interface will %s be created on tunnel start.", interfaceInfo.Interface)})
-	})
-
-	r.POST("/routes", func(c *gin.Context) {
-		type RouteInfo struct {
-			Interface string
-			Route     []string
-		}
-		var routeInfo RouteInfo
-		if err := c.ShouldBindJSON(&routeInfo); err != nil {
-			c.JSON(http.StatusInternalServerError, inputError)
-			return
-		}
-		for _, route := range routeInfo.Route {
-			if err := config.AddRouteConfig(routeInfo.Interface, route); err != nil {
-				c.Error(err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			if netinfo.CanCreateTUNs() {
+				if err := netinfo.CreateTUN(interfaceInfo.Interface); err != nil {
+					c.Error(err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Interface %s created.", interfaceInfo.Interface)})
 				return
 			}
-		}
+			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Interface will %s be created on tunnel start.", interfaceInfo.Interface)})
+		})
 
-		if netinfo.InterfaceExist(routeInfo.Interface) {
-			stun, err := netinfo.GetTunByName(routeInfo.Interface)
-			if err != nil {
-				c.Error(err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		apiv1.POST("/routes", func(c *gin.Context) {
+			type RouteInfo struct {
+				Interface string
+				Route     []string
+			}
+			var routeInfo RouteInfo
+			if err := c.ShouldBindJSON(&routeInfo); err != nil {
+				c.JSON(http.StatusInternalServerError, inputError)
 				return
 			}
 			for _, route := range routeInfo.Route {
-				if err := stun.AddRoute(route); err != nil {
+				if err := config.AddRouteConfig(routeInfo.Interface, route); err != nil {
 					c.Error(err)
 					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 					return
 				}
 			}
-			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Routes %s added.", routeInfo.Route)})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Routes %s will be created on tunnel start.", routeInfo.Route)})
-		return
-	})
 
-	r.DELETE("/routes", func(c *gin.Context) {
-		type RouteInfo struct {
-			Interface string
-			Route     string
-		}
-		var routeInfo RouteInfo
-		if err := c.ShouldBindJSON(&routeInfo); err != nil {
-			c.JSON(http.StatusInternalServerError, inputError)
+			if netinfo.InterfaceExist(routeInfo.Interface) {
+				stun, err := netinfo.GetTunByName(routeInfo.Interface)
+				if err != nil {
+					c.Error(err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				for _, route := range routeInfo.Route {
+					if err := stun.AddRoute(route); err != nil {
+						c.Error(err)
+						c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+						return
+					}
+				}
+				c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Routes %s added.", routeInfo.Route)})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Routes %s will be created on tunnel start.", routeInfo.Route)})
 			return
-		}
-		if err := config.DeleteRouteConfig(routeInfo.Interface, routeInfo.Route); err != nil {
-			c.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		})
+
+		apiv1.DELETE("/routes", func(c *gin.Context) {
+			type RouteInfo struct {
+				Interface string
+				Route     string
+			}
+			var routeInfo RouteInfo
+			if err := c.ShouldBindJSON(&routeInfo); err != nil {
+				c.JSON(http.StatusInternalServerError, inputError)
+				return
+			}
+			if err := config.DeleteRouteConfig(routeInfo.Interface, routeInfo.Route); err != nil {
+				c.Error(err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if netinfo.InterfaceExist(routeInfo.Interface) {
+				stun, err := netinfo.GetTunByName(routeInfo.Interface)
+				if err != nil {
+					c.Error(err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				if err := stun.DelRoute(routeInfo.Route); err != nil {
+					c.Error(err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Route %s deleted.", routeInfo.Route)})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Route %s does not exist.", routeInfo.Route)})
 			return
-		}
-		if netinfo.InterfaceExist(routeInfo.Interface) {
-			stun, err := netinfo.GetTunByName(routeInfo.Interface)
+		})
+
+		apiv1.GET("/listeners", func(c *gin.Context) {
+			type ListenerInfo struct {
+				ListenerID   int32
+				AgentID      int
+				Agent        string
+				RemoteAddr   string
+				SessionID    string
+				Network      string
+				ListenerAddr string
+				RedirectAddr string
+				Online       bool
+			}
+			var listeners []ListenerInfo
+			for agentId, agent := range AgentList {
+				for _, listener := range agent.Listeners {
+					listeners = append(listeners, ListenerInfo{
+						ListenerID:   listener.ID,
+						Agent:        agent.Name,
+						AgentID:      agentId,
+						RemoteAddr:   agent.Session.RemoteAddr().String(),
+						SessionID:    agent.SessionID,
+						Network:      listener.Network(),
+						ListenerAddr: listener.ListenerAddr(),
+						RedirectAddr: listener.RedirectAddr(),
+						Online:       agent.Alive(),
+					})
+				}
+			}
+			c.IndentedJSON(http.StatusOK, listeners)
+		})
+
+		apiv1.DELETE("/listeners", func(c *gin.Context) {
+			type ListenerDeleteRequest struct {
+				ListenerID int
+				AgentID    int
+			}
+			var listenerDeleteRequest ListenerDeleteRequest
+			if err := c.ShouldBindJSON(&listenerDeleteRequest); err != nil {
+				c.Error(err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if _, ok := AgentList[listenerDeleteRequest.AgentID]; !ok {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid agent"})
+				return
+			}
+			AgentList[listenerDeleteRequest.AgentID].DeleteListener(listenerDeleteRequest.ListenerID)
+			c.JSON(http.StatusOK, gin.H{"message": "listener deleted"})
+		})
+
+		apiv1.POST("/listeners", func(c *gin.Context) {
+			type ListenerRequest struct {
+				AgentID      int
+				ListenerAddr string
+				RedirectAddr string
+				Network      string
+			}
+
+			var listenerRequest ListenerRequest
+			if err := c.ShouldBindJSON(&listenerRequest); err != nil {
+				c.JSON(http.StatusInternalServerError, inputError)
+				return
+			}
+			if _, ok := AgentList[listenerRequest.AgentID]; !ok {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid agent"})
+				return
+			}
+			if _, err := AgentList[listenerRequest.AgentID].AddListener(listenerRequest.ListenerAddr, listenerRequest.Network, listenerRequest.RedirectAddr); err != nil {
+				c.Error(err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"message": "listener created"})
+		})
+
+		apiv1.GET("/agents", func(c *gin.Context) {
+			c.IndentedJSON(http.StatusOK, AgentList)
+		})
+
+		apiv1.DELETE("/tunnel/:id", func(c *gin.Context) {
+			tunnelParam := c.Param("id")
+			tunnelId, err := strconv.Atoi(tunnelParam)
 			if err != nil {
-				c.Error(err)
+				c.JSON(http.StatusInternalServerError, inputError)
+				return
+			}
+			if _, ok := AgentList[tunnelId]; !ok {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid agent"})
+				return
+			}
+			CurrentAgent := AgentList[tunnelId]
+
+			if CurrentAgent.Session == nil || !CurrentAgent.Running {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "tunnel not started"})
+				return
+			}
+			CurrentAgent.CloseChan <- true
+			CurrentAgent.Running = false
+			c.JSON(http.StatusOK, gin.H{"message": "tunnel stopping"})
+		})
+
+		apiv1.POST("/tunnel/:id", func(c *gin.Context) {
+			type TunnelStart struct {
+				Interface string
+			}
+			var tunnelRequest TunnelStart
+			tunnelParam := c.Param("id")
+			tunnelId, err := strconv.Atoi(tunnelParam)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, inputError)
+				return
+			}
+			if err := c.ShouldBindJSON(&tunnelRequest); err != nil {
+				c.JSON(http.StatusInternalServerError, inputError)
+				return
+			}
+			if _, ok := AgentList[tunnelId]; !ok {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid agent"})
+				return
+			}
+			CurrentAgent := AgentList[tunnelId]
+			if err := StartTunnel(CurrentAgent, tunnelRequest.Interface); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			if err := stun.DelRoute(routeInfo.Route); err != nil {
-				c.Error(err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Route %s deleted.", routeInfo.Route)})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Route %s does not exist.", routeInfo.Route)})
-		return
-	})
-
-	r.GET("/listeners", func(c *gin.Context) {
-		type ListenerInfo struct {
-			ListenerID   int32
-			AgentID      int
-			Agent        string
-			RemoteAddr   string
-			SessionID    string
-			Network      string
-			ListenerAddr string
-			RedirectAddr string
-			Online       bool
-		}
-		var listeners []ListenerInfo
-		for agentId, agent := range AgentList {
-			for _, listener := range agent.Listeners {
-				listeners = append(listeners, ListenerInfo{
-					ListenerID:   listener.ID,
-					Agent:        agent.Name,
-					AgentID:      agentId,
-					RemoteAddr:   agent.Session.RemoteAddr().String(),
-					SessionID:    agent.SessionID,
-					Network:      listener.Network(),
-					ListenerAddr: listener.ListenerAddr(),
-					RedirectAddr: listener.RedirectAddr(),
-					Online:       agent.Alive(),
-				})
-			}
-		}
-		c.IndentedJSON(http.StatusOK, listeners)
-	})
-
-	r.DELETE("/listeners", func(c *gin.Context) {
-		type ListenerDeleteRequest struct {
-			ListenerID int
-			AgentID    int
-		}
-		var listenerDeleteRequest ListenerDeleteRequest
-		if err := c.ShouldBindJSON(&listenerDeleteRequest); err != nil {
-			c.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if _, ok := AgentList[listenerDeleteRequest.AgentID]; !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid agent"})
-			return
-		}
-		AgentList[listenerDeleteRequest.AgentID].DeleteListener(listenerDeleteRequest.ListenerID)
-		c.JSON(http.StatusOK, gin.H{"message": "listener deleted"})
-	})
-
-	r.POST("/listeners", func(c *gin.Context) {
-		type ListenerRequest struct {
-			AgentID      int
-			ListenerAddr string
-			RedirectAddr string
-			Network      string
-		}
-
-		var listenerRequest ListenerRequest
-		if err := c.ShouldBindJSON(&listenerRequest); err != nil {
-			c.JSON(http.StatusInternalServerError, inputError)
-			return
-		}
-		if _, ok := AgentList[listenerRequest.AgentID]; !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid agent"})
-			return
-		}
-		if _, err := AgentList[listenerRequest.AgentID].AddListener(listenerRequest.ListenerAddr, listenerRequest.Network, listenerRequest.RedirectAddr); err != nil {
-			c.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "listener created"})
-	})
-
-	r.GET("/agents", func(c *gin.Context) {
-		c.IndentedJSON(http.StatusOK, AgentList)
-	})
-
-	r.DELETE("/tunnel/:id", func(c *gin.Context) {
-		tunnelParam := c.Param("id")
-		tunnelId, err := strconv.Atoi(tunnelParam)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, inputError)
-			return
-		}
-		if _, ok := AgentList[tunnelId]; !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid agent"})
-			return
-		}
-		CurrentAgent := AgentList[tunnelId]
-
-		if CurrentAgent.Session == nil || !CurrentAgent.Running {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "tunnel not started"})
-			return
-		}
-		CurrentAgent.CloseChan <- true
-		CurrentAgent.Running = false
-		c.JSON(http.StatusOK, gin.H{"message": "tunnel stopping"})
-	})
-
-	r.POST("/tunnel/:id", func(c *gin.Context) {
-		type TunnelStart struct {
-			Interface string
-		}
-		var tunnelRequest TunnelStart
-		tunnelParam := c.Param("id")
-		tunnelId, err := strconv.Atoi(tunnelParam)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, inputError)
-			return
-		}
-		if err := c.ShouldBindJSON(&tunnelRequest); err != nil {
-			c.JSON(http.StatusInternalServerError, inputError)
-			return
-		}
-		if _, ok := AgentList[tunnelId]; !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid agent"})
-			return
-		}
-		CurrentAgent := AgentList[tunnelId]
-		if err := StartTunnel(CurrentAgent, tunnelRequest.Interface); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "tunnel starting"})
-	})
+			c.JSON(http.StatusOK, gin.H{"message": "tunnel starting"})
+		})
+	}
 
 	if config.Config.GetBool("web.tls.enabled") {
 		// create tls config
