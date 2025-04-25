@@ -1,0 +1,3 @@
+[submodule "web/ligolo-ng-web"]
+	path = web/ligolo-ng-web
+	url = https://github.com/nicocha30/ligolo-ng-web

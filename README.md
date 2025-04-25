@@ -11,13 +11,19 @@ An advanced, yet simple, tunneling tool that uses TUN interfaces.
 
 [📑 Ligolo-ng Documentation (Setup/Quickstart)](https://docs.ligolo.ng/)
 
-You use Ligolo-ng for your penetration tests? Did it help you pass a certification? Please consider sponsoring the project so I can buy my team some drinks. ☕
-
-[:heart: Sponsor nicocha30](https://github.com/sponsors/nicocha30)
-
-We would like to thank the following people for their support in the development of Ligolo-ng.
-
-<!-- sponsors --><a href="https://github.com/agathebower"><img src="https://github.com/agathebower.png" width="50px" alt="agathebower" /></a>&nbsp;&nbsp;<!-- sponsors -->
+> [!TIP]
+> Ligolo-ng 0.8 added a lot of new features, including:
+> - 🌐 API and a beautiful Web Interface thanks to [L'ami du Raisin](https://github.com/jeremiebedjai), allowing **multiplayer**!
+> - ⚙️ Simple configuration file, to keep your tunneling/proxy settings
+> - 🚦 **Daemon mode**, to run Ligolo-ng as a service
+> - 🔗 Auto-bind, to **automatically configure tunneling** whenever a specific agent connects
+> - 📶 Easy and automatic (autoroute) route and interface management on **Windows, Linux, MacOS and BSD**!
+> - 💀 Agent kill, to remotely terminate an agent
+>
+> Please try it out! 
+> [Release: Ligolo-ng 0.8](https://github.com/nicocha30/ligolo-ng/releases/tag/v0.8)
+> 
+> ![Ligolo Web](doc/webui.png)
 
 ## Table of Contents
 
@@ -134,3 +140,4 @@ When using *nmap*, you should use `--unprivileged` or `-PE` to avoid false posit
 ## Credits
 
 - Nicolas Chatelain <nicolas -at- chatelain.me>
+- Jeremie Bedjai (Ligolo-ng-Web)

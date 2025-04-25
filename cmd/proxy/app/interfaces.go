@@ -1,3 +1,21 @@
+// Ligolo-ng
+// Copyright (C) 2025 Nicolas Chatelain (nicocha30)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+//go:build windows || linux || freebsd || openbsd || darwin
+
 package app
 
 import (
@@ -6,7 +24,9 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/desertbit/grumble"
 	"github.com/jedib0t/go-pretty/v6/table"
-	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack/tun"
+	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/nicocha30/ligolo-ng/cmd/proxy/config"
+	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo"
 	"github.com/nicocha30/ligolo-ng/pkg/utils/codenames"
 	"github.com/sirupsen/logrus"
 	"net"
@@ -24,21 +44,21 @@ func init() {
 		Run: func(c *grumble.Context) error {
 			t := table.NewWriter()
 			t.SetStyle(table.StyleLight)
-			t.SetTitle("Available tuntaps")
-			t.AppendHeader(table.Row{"#", "Tap Name", "Dst routes"})
+			t.SetTitle("Interface list")
+			t.AppendHeader(table.Row{"#", "Tap Name", "Dst routes", "State"})
 
-			tuntaps, err := tun.GetTunTaps()
+			interfaces, err := config.GetInterfaceConfigState()
 			if err != nil {
 				return err
 			}
-			for i, tuntap := range tuntaps {
-				var prettyRoute []string
-				for _, route := range tuntap.Routes() {
-					prettyRoute = append(prettyRoute, route.Dst.String())
-				}
-				t.AppendRow(table.Row{i, tuntap.Name(), strings.Join(prettyRoute, ",")})
+
+			var i int
+			for tapName, tapInfo := range interfaces {
+				t.AppendRow(table.Row{i, tapName, tapInfo.GetRouteString(), tapInfo.GetStateString()})
+				i++
 			}
 			App.Println(t.Render())
+			App.Println(text.Colors{text.FgYellow}.Sprintf("Interfaces and routes with \"Pending\" state will be created on tunnel start."))
 			return nil
 		},
 	})
@@ -64,18 +84,26 @@ func init() {
 
 				ifName = codenames.Generate(rng)
 			}
-			logrus.Infof("Creating a new \"%s\" interface...", ifName)
-			if err := tun.CreateTUN(ifName); err != nil {
+			if err := config.AddInterfaceConfig(ifName); err != nil {
 				return err
 			}
-			logrus.Info("Interface created!")
+			if netinfo.CanCreateTUNs() {
+				logrus.Infof("Creating a new %s interface...", ifName)
+				if err := netinfo.CreateTUN(ifName); err != nil {
+					return err
+				}
+				logrus.Info("Interface created!")
+
+			} else {
+				logrus.Infof("Interface will %s be created on tunnel start.", ifName)
+			}
 			return nil
 		},
 	})
 
 	App.AddCommand(&grumble.Command{
 		Name:      "interface_delete",
-		Aliases:   []string{"ifdel"},
+		Aliases:   []string{"ifdel", "interface_del"},
 		Help:      "Delete a tuntap interface",
 		Usage:     "interface_delete --name [ifname]",
 		HelpGroup: "Interfaces",
@@ -83,19 +111,28 @@ func init() {
 			f.StringL("name", "", "the interface name to delete")
 		},
 		Run: func(c *grumble.Context) error {
-
 			ifName := c.Flags.String("name")
 			if ifName == "" {
 				return errors.New("please specify a valid interface using --name [interface]")
 			}
-			stun, err := tun.GetTunByName(ifName)
-			if err != nil {
-				return err
+			if len(config.GetInterfaceRoutesConfig(ifName)) > 0 {
+				if ask("Remove all interface routes and settings from config?") {
+					if err := config.DeleteInterfaceConfig(ifName); err != nil {
+						return err
+					}
+				}
 			}
-			if err := stun.Destroy(); err != nil {
-				return err
+
+			if netinfo.InterfaceExist(ifName) {
+				stun, err := netinfo.GetTunByName(ifName)
+				if err != nil {
+					return err
+				}
+				if err := stun.Destroy(); err != nil {
+					return err
+				}
+				logrus.Info("Interface removed.")
 			}
-			logrus.Info("Interface destroyed.")
 			return nil
 		},
 	})
@@ -121,14 +158,22 @@ func init() {
 				return errors.New("please specify a route")
 			}
 
-			stun, err := tun.GetTunByName(ifName)
-			if err != nil {
+			if err := config.AddRouteConfig(ifName, routeCidr); err != nil {
 				return err
 			}
-			if err := stun.AddRoute(routeCidr); err != nil {
-				return err
+
+			if netinfo.InterfaceExist(ifName) {
+				stun, err := netinfo.GetTunByName(ifName)
+				if err != nil {
+					return err
+				}
+				if err := stun.AddRoute(routeCidr); err != nil {
+					return err
+				}
+				logrus.Info("Route created.")
+			} else {
+				logrus.Infof("Route %s on %s be added on tunnel start.", routeCidr, ifName)
 			}
-			logrus.Info("Route created.")
 			return nil
 		},
 	})
@@ -145,16 +190,17 @@ func init() {
 		},
 		Run: func(c *grumble.Context) error {
 
+			interfaces, err := config.GetInterfaceConfigState()
+			if err != nil {
+				return err
+			}
+
 			routeCidr := c.Flags.String("route")
 			if routeCidr == "" {
-				tuntaps, err := tun.GetTunTaps()
-				if err != nil {
-					return err
-				}
 				var possibleRoutes []string
-				for _, tuntap := range tuntaps {
-					for _, route := range tuntap.Routes() {
-						possibleRoutes = append(possibleRoutes, fmt.Sprintf("%s (%s)", route.Dst.String(), tuntap.Name()))
+				for ifName, ifInfo := range interfaces {
+					for _, route := range ifInfo.Routes {
+						possibleRoutes = append(possibleRoutes, fmt.Sprintf("%s (%s)", route.Destination, ifName))
 					}
 				}
 				if len(possibleRoutes) == 0 {
@@ -170,13 +216,25 @@ func init() {
 					return err
 				}
 				for _, selectedRoute := range selectedRoutes {
-					route := strings.Split(selectedRoute, " ")[0]
-					ifByRoute, err := tun.GetTunByRoute(route)
-					if err != nil {
-						logrus.Errorf("Failed to get tuntap by route \"%s\": %v", route, err)
-					}
-					if err := ifByRoute.DelRoute(route); err != nil {
-						logrus.Errorf("Failed to delete route \"%s\": %v", route, err)
+					routeSelection := strings.Split(selectedRoute, " ")[0]
+
+					for ifName, ifInfo := range interfaces {
+						for _, route := range ifInfo.Routes {
+							if route.Destination == routeSelection {
+								if route.Active {
+									tun, err := netinfo.GetTunByName(ifName)
+									if err != nil {
+										return err
+									}
+									if err := tun.DelRoute(route.Destination); err != nil {
+										logrus.Errorf("Could not delete route %s: %s", route.Destination, err)
+									}
+								}
+								if err := config.DeleteRouteConfig(ifName, route.Destination); err != nil {
+									logrus.Errorf("Could not delete route %s from config: %s", route.Destination, err)
+								}
+							}
+						}
 					}
 				}
 				return nil
@@ -184,15 +242,18 @@ func init() {
 			ifName := c.Flags.String("name")
 			if ifName == "" {
 				// Attempt to search for route.
-				ifByRoute, err := tun.GetTunByRoute(routeCidr)
+				ifByRoute, err := netinfo.GetTunByRoute(routeCidr)
 				if err != nil {
 					return err
 				}
 				ifName = ifByRoute.Name()
 			}
 
-			stun, err := tun.GetTunByName(ifName)
+			stun, err := netinfo.GetTunByName(ifName)
 			if err != nil {
+				return err
+			}
+			if err := config.DeleteRouteConfig(ifName, routeCidr); err != nil {
 				return err
 			}
 			if err := stun.DelRoute(routeCidr); err != nil {
@@ -261,9 +322,15 @@ func init() {
 
 				ifName := codenames.Generate(rng)
 
-				logrus.Infof("Creating a new \"%s\" interface...", ifName)
-				if err := tun.CreateTUN(ifName); err != nil {
-					return err
+				if netinfo.CanCreateTUNs() {
+					logrus.Infof("Creating a new \"%s\" interface...", ifName)
+					if err := netinfo.CreateTUN(ifName); err != nil {
+						return err
+					}
+					logrus.Info("Interface created!")
+
+				} else {
+					logrus.Infof("Interface will \"%s\" be created on tunnel start.", ifName)
 				}
 				selectedIface = ifName
 			} else {
@@ -279,8 +346,8 @@ func init() {
 					return err
 				}
 			}
-			logrus.Infof("Using interface %s, creating routes...", selectedIface)
-			stun, err := tun.GetTunByName(selectedIface)
+			logrus.Infof("Creating routes for %s...", selectedIface)
+			stun, err := netinfo.GetTunByName(selectedIface)
 			if err != nil {
 				return err
 			}
@@ -299,7 +366,9 @@ func init() {
 			survey.AskOne(prompt, &startTunnel)
 
 			if startTunnel {
-				go StartTunnel(CurrentAgent, selectedIface)
+				if err := StartTunnel(CurrentAgent, selectedIface); err != nil {
+					return fmt.Errorf("unable to start tunnel: %v", err)
+				}
 			} else {
 				logrus.Infof("You can start the tunnel with: start --tun %s", selectedIface)
 			}

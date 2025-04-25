@@ -14,27 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-package app
+package web
 
-import (
-	"github.com/AlecAivazis/survey/v2"
-	"github.com/desertbit/grumble"
-)
+import "embed"
 
-// App is used to register the grumble
-var App = grumble.New(&grumble.Config{
-	Name:                  "ligolo-ng",
-	Description:           "Ligolo-ng - An advanced, yet simple tunneling tool",
-	HelpHeadlineUnderline: true,
-	HelpSubCommands:       true,
-	HistoryFile:           "ligolo-ng.history",
-})
+//go:generate npm install -C ligolo-ng-web
+//go:generate npm run build-ligolo -C ligolo-ng-web
 
-func ask(question string) bool {
-	result := false
-	prompt := &survey.Confirm{
-		Message: question,
-	}
-	survey.AskOne(prompt, &result)
-	return result
-}
+//go:embed dist
+var LigoloWebFS embed.FS

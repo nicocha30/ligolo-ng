@@ -1,3 +1,19 @@
+// Ligolo-ng
+// Copyright (C) 2025 Nicolas Chatelain (nicocha30)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -9,6 +25,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,7 +35,6 @@ import (
 
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/agent"
-	"github.com/nicocha30/ligolo-ng/pkg/utils/selfcert"
 	"github.com/sirupsen/logrus"
 	goproxy "golang.org/x/net/proxy"
 	"nhooyr.io/websocket"
@@ -66,33 +82,7 @@ func main() {
 	}
 
 	if *bindAddr != "" {
-		selfcrt := selfcert.NewSelfCert(nil)
-		crt, err := selfcrt.GetCertificate(*bindAddr)
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		logrus.Warnf("TLS Certificate fingerprint is: %X\n", sha256.Sum256(crt.Certificate[0]))
-		tlsConfig.GetCertificate = func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			return crt, nil
-		}
-		lis, err := net.Listen("tcp", *bindAddr)
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		logrus.Infof("Listening on %s...", *bindAddr)
-		for {
-			conn, err := lis.Accept()
-			if err != nil {
-				logrus.Error(err)
-				continue
-			}
-			logrus.Infof("Got connection from: %s\n", conn.RemoteAddr())
-			tlsConn := tls.Server(conn, &tlsConfig)
-
-			if err := connect(tlsConn); err != nil {
-				logrus.Error(err)
-			}
-		}
+		bind(&tlsConfig, *bindAddr)
 	}
 
 	if *serverAddr == "" {
@@ -200,6 +190,36 @@ func connect(conn net.Conn) error {
 			return err
 		}
 		go agent.HandleConn(conn)
+	}
+}
+
+func bind(config *tls.Config, bindAddr string) {
+	selfcrt := tlsutils.NewSelfCert(nil)
+	crt, err := selfcrt.GetCertificate(bindAddr)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	logrus.Warnf("TLS Certificate fingerprint is: %X\n", sha256.Sum256(crt.Certificate[0]))
+	config.GetCertificate = func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return crt, nil
+	}
+	lis, err := net.Listen("tcp", bindAddr)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	logrus.Infof("Listening on %s...", bindAddr)
+	for {
+		conn, err := lis.Accept()
+		if err != nil {
+			logrus.Error(err)
+			continue
+		}
+		logrus.Infof("Got connection from: %s\n", conn.RemoteAddr())
+		tlsConn := tls.Server(conn, config)
+
+		if err := connect(tlsConn); err != nil {
+			logrus.Error(err)
+		}
 	}
 }
 

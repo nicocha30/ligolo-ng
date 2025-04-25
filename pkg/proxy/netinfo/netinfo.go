@@ -14,27 +14,42 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-package app
+package netinfo
 
 import (
-	"github.com/AlecAivazis/survey/v2"
-	"github.com/desertbit/grumble"
+	"errors"
+	"net"
 )
 
-// App is used to register the grumble
-var App = grumble.New(&grumble.Config{
-	Name:                  "ligolo-ng",
-	Description:           "Ligolo-ng - An advanced, yet simple tunneling tool",
-	HelpHeadlineUnderline: true,
-	HelpSubCommands:       true,
-	HistoryFile:           "ligolo-ng.history",
-})
+type Route struct {
+	Dst string
+	Src string
+	Gw  string
+}
 
-func ask(question string) bool {
-	result := false
-	prompt := &survey.Confirm{
-		Message: question,
+// Used by Ligolo-API
+type TunInfo struct {
+	Index  int
+	Name   string
+	Routes []Route
+}
+
+func GetTunByRoute(route string) (Tun, error) {
+	tuns, err := GetTunTaps()
+	if err != nil {
+		return Tun{}, err
 	}
-	survey.AskOne(prompt, &result)
-	return result
+	for _, tun := range tuns {
+		for _, rt := range tun.Routes() {
+			if rt.Dst == route {
+				return tun, nil
+			}
+		}
+	}
+	return Tun{}, errors.New("could not find interface belonging to route")
+}
+
+func InterfaceExist(name string) bool {
+	_, err := net.InterfaceByName(name)
+	return err == nil
 }

@@ -1,7 +1,24 @@
+// Ligolo-ng
+// Copyright (C) 2025 Nicolas Chatelain (nicocha30)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package agent
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -28,8 +45,7 @@ var sessionID string
 func init() {
 	listenerConntrack = make(map[int32]net.Conn)
 	listenerMap = make(map[int32]interface{})
-	id := uuid.New()
-	sessionID = id.String()
+	sessionID = hex.EncodeToString(uuid.NodeID())
 }
 
 // Listener is the base class implementing listener sockets for Ligolo
@@ -327,7 +343,7 @@ func HandleConn(conn net.Conn) {
 
 		relay.StartRelay(netConn, conn)
 
-	case *protocol.ListenerCloseResponsePacket:
+	case *protocol.AgentKillRequestPacket:
 		os.Exit(0)
 
 	}

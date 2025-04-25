@@ -1,6 +1,23 @@
+// Ligolo-ng
+// Copyright (C) 2025 Nicolas Chatelain (nicocha30)
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package protocol
 
 import (
+	"encoding/json"
 	"net"
 )
 
@@ -25,7 +42,7 @@ const (
 	MessageListenerSockResponse
 	MessageListenerCloseRequest
 	MessageListenerCloseResponse
-	MessageClose
+	MessageAgentKillRequest
 	MessageListenerSocketConnectionReady
 )
 
@@ -115,6 +132,26 @@ type NetInterface struct {
 	Addresses    []string
 }
 
+func (ni NetInterface) MarshalJSON() ([]byte, error) {
+	type NetInterfaceInfo struct {
+		Index        int
+		MTU          int
+		Name         string
+		HardwareAddr string
+		Flags        net.Flags
+		Addresses    []string
+	}
+
+	return json.Marshal(NetInterfaceInfo{
+		Index:        ni.Index,
+		MTU:          ni.MTU,
+		Name:         ni.Name,
+		HardwareAddr: ni.HardwareAddr.String(),
+		Flags:        ni.Flags,
+		Addresses:    ni.Addresses,
+	})
+}
+
 // NewNetInterfaces converts a net.Interface slice to a NetInterface slice that can be transmitted over Gob
 func NewNetInterfaces(netif []net.Interface) (out []NetInterface) {
 	// the net.Interface struct doesn't contains the IP Address, we need a new struct that store IPs
@@ -162,3 +199,6 @@ type HostPingRequestPacket struct {
 type HostPingResponsePacket struct {
 	Alive bool
 }
+
+// AgentKillRequestPacket is sent by the proxy to terminate an agent
+type AgentKillRequestPacket struct{}
