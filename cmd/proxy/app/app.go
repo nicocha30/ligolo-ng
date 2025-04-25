@@ -74,7 +74,7 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 			}
 
 			for lid, listener := range registeredAgents.Listeners {
-				logrus.Info(fmt.Sprintf("Restarting listener: %s", listener.String()))
+				logrus.Infof("Restarting listener: %s", listener.String())
 				if err := listener.ResetMultiplexer(registeredAgents.Session); err != nil {
 					logrus.Errorf("Failed to reset yamux: %v", err)
 				}
@@ -625,7 +625,7 @@ func Run() {
 				return ErrInvalidAgent
 			}
 			currentAgent := AgentList[CurrentAgentID]
-			if Ask("Are you sure to kill the current agent?") {
+			if ask("Are you sure to kill the current agent?") {
 				return currentAgent.Kill()
 			}
 			return nil

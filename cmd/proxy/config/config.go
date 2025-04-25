@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/AlecAivazis/survey/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/argon2"
@@ -141,6 +142,15 @@ func secureConfigPasswords() {
 	Config.Set("web.users", users)
 }
 
+func ask(question string) bool {
+	result := false
+	prompt := &survey.Confirm{
+		Message: question,
+	}
+	survey.AskOne(prompt, &result)
+	return result
+}
+
 func InitConfig(configFile string) {
 	var firstStart bool
 	if configFile == "" {
@@ -174,14 +184,29 @@ func InitConfig(configFile string) {
 		}
 	}
 
-	Config.SetDefault("web.enabled", false)
-	Config.SetDefault("web.enableui", true)
+	if firstStart {
+		enableWebUI := ask("Enable Ligolo-ng WebUI?")
+		Config.SetDefault("web.enabled", enableWebUI)
+		Config.SetDefault("web.enableui", enableWebUI)
+
+		if enableWebUI {
+			if ask("Allow CORS Access from https://webui.ligolo.ng?") {
+				Config.SetDefault("web.corsAllowedOrigin", []string{"https://webui.ligolo.ng"})
+			} else {
+				Config.SetDefault("web.corsAllowedOrigin", []string{"http://127.0.0.1:8080"})
+			}
+			logrus.Warn("WebUI enabled, default username and login are ligolo:password - make sure to update ligolo-ng.yaml to change credentials!")
+		}
+	} else {
+		Config.SetDefault("web.enabled", false)
+		Config.SetDefault("web.enableui", true)
+		Config.SetDefault("web.corsAllowedOrigin", []string{"http://127.0.0.1:8080"})
+	}
+	Config.SetDefault("web.users", map[string]string{"ligolo": "password"})
 	Config.SetDefault("web.listen", "127.0.0.1:8080")
-	Config.SetDefault("web.corsAllowedOrigin", []string{"https://webui.ligolo.ng"})
 	Config.SetDefault("web.debug", false)
 	Config.SetDefault("web.logfile", "ui.log")
 	Config.SetDefault("web.behindreverseproxy", false)
-	Config.SetDefault("web.users", map[string]string{"ligolo": "password"})
 	Config.SetDefault("web.trustedproxies", []string{"127.0.0.1"})
 	Config.SetDefault("web.tls.enabled", false)
 	Config.SetDefault("web.tls.selfcert", false)

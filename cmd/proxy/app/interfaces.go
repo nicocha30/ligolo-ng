@@ -79,7 +79,7 @@ func init() {
 				logrus.Info("Interface created!")
 
 			} else {
-				logrus.Info("Interface will %s be created on tunnel start.", ifName)
+				logrus.Infof("Interface will %s be created on tunnel start.", ifName)
 			}
 			return nil
 		},
@@ -100,7 +100,7 @@ func init() {
 				return errors.New("please specify a valid interface using --name [interface]")
 			}
 			if len(config.GetInterfaceRoutesConfig(ifName)) > 0 {
-				if Ask("Remove all interface routes and settings from config?") {
+				if ask("Remove all interface routes and settings from config?") {
 					if err := config.DeleteInterfaceConfig(ifName); err != nil {
 						return err
 					}
@@ -156,7 +156,7 @@ func init() {
 				}
 				logrus.Info("Route created.")
 			} else {
-				logrus.Info("Route %s on %s be added on tunnel start.", routeCidr, ifName)
+				logrus.Infof("Route %s on %s be added on tunnel start.", routeCidr, ifName)
 			}
 			return nil
 		},
@@ -314,7 +314,7 @@ func init() {
 					logrus.Info("Interface created!")
 
 				} else {
-					logrus.Info("Interface will \"%s\" be created on tunnel start.", ifName)
+					logrus.Infof("Interface will \"%s\" be created on tunnel start.", ifName)
 				}
 				selectedIface = ifName
 			} else {

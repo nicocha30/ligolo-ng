@@ -14,7 +14,7 @@ var App = grumble.New(&grumble.Config{
 	HistoryFile:           "ligolo-ng.history",
 })
 
-func Ask(question string) bool {
+func ask(question string) bool {
 	result := false
 	prompt := &survey.Confirm{
 		Message: question,

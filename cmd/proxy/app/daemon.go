@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 import "github.com/golang-jwt/jwt/v5"
@@ -100,8 +101,12 @@ func StartLigoloApi() {
 		if err != nil {
 			logrus.Fatal(err)
 		}
-		r.Use(static.Serve("/ui", eFs))
-		r.NoRoute()
+		r.Use(static.Serve("/", eFs))
+		r.NoRoute(func(c *gin.Context) {
+			if !strings.HasPrefix(c.Request.RequestURI, "/api") {
+				c.FileFromFS("index.html", eFs)
+			}
+		})
 	}
 
 	r.POST("/api/auth", func(c *gin.Context) {
