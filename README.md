@@ -13,12 +13,16 @@ An advanced, yet simple, tunneling tool that uses TUN interfaces.
 
 > [!TIP]
 > Ligolo-ng 0.8 added a lot of new features, including:
-> - 🌐 API and a beautiful Web Interface thanks to [L'ami du Raisin](https://github.com/jeremiebedjai), allowing multiplayer
+> - 🌐 API and a beautiful Web Interface thanks to [L'ami du Raisin](https://github.com/jeremiebedjai), allowing **multiplayer**!
 > - ⚙️ Simple configuration file, to keep your tunneling/proxy settings
-> - 🚦 Daemon mode, to run Ligolo-ng as a service
-> - 🔗 Auto-bind, to automatically configure tunneling whenever a specific agent connects
-> - 📶 Easy and automatic (autoroute) route and interface management on Windows, Linux, MacOS and BSD!
+> - 🚦 **Daemon mode**, to run Ligolo-ng as a service
+> - 🔗 Auto-bind, to **automatically configure tunneling** whenever a specific agent connects
+> - 📶 Easy and automatic (autoroute) route and interface management on **Windows, Linux, MacOS and BSD**!
 > - 💀 Agent kill, to remotely terminate an agent
+>
+> Please try it out! 
+> [Release: Ligolo-ng 0.8](https://github.com/nicocha30/ligolo-ng/releases/tag/v0.8)
+> 
 > ![Ligolo Web](doc/webui.png)
 
 ## Table of Contents
