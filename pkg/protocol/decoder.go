@@ -18,9 +18,8 @@ package protocol
 
 import (
 	"fmt"
+	"github.com/shamaton/msgpack/v2"
 	"io"
-
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 // LigoloDecoder is the struct containing the decoded Envelope and the reader
@@ -75,20 +74,17 @@ func interfaceFromPayloadType(payloadType uint8) (interface{}, error) {
 
 // Decode read content from the reader and fill the Envelope
 func (d *LigoloDecoder) Decode() error {
-	packer := msgpack.NewDecoder(d.reader)
 	var payloadType uint8
-
-	err := packer.Decode(&payloadType)
+	err := msgpack.UnmarshalRead(d.reader, &payloadType)
 	if err != nil {
 		return err
 	}
-
 	p, err := interfaceFromPayloadType(payloadType)
 	if err != nil {
 		return err
 	}
 
-	if err := packer.Decode(p); err != nil {
+	if err := msgpack.UnmarshalRead(d.reader, p); err != nil {
 		return err
 	}
 	d.Payload = p

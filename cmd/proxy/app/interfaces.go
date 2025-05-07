@@ -322,16 +322,7 @@ func init() {
 
 				ifName := codenames.Generate(rng)
 
-				if netinfo.CanCreateTUNs() {
-					logrus.Infof("Creating a new \"%s\" interface...", ifName)
-					if err := netinfo.CreateTUN(ifName); err != nil {
-						return err
-					}
-					logrus.Info("Interface created!")
-
-				} else {
-					logrus.Infof("Interface will \"%s\" be created on tunnel start.", ifName)
-				}
+				logrus.Infof("Using interface name %s", ifName)
 				selectedIface = ifName
 			} else {
 				ifaces, err := net.Interfaces()
@@ -346,17 +337,17 @@ func init() {
 					return err
 				}
 			}
-			logrus.Infof("Creating routes for %s...", selectedIface)
-			stun, err := netinfo.GetTunByName(selectedIface)
-			if err != nil {
-				return err
+
+			if err := config.AddInterfaceConfig(selectedIface); err != nil {
+				return fmt.Errorf("could not add interface to config: %s", err)
 			}
+
+			logrus.Infof("Creating routes for %s...", selectedIface)
+
 			for _, route := range selectedRoutes {
-				if err := stun.AddRoute(route); err != nil {
-					logrus.Errorf("Could not add route %s: %v", route, err)
-					continue
+				if err := config.AddRouteConfig(selectedIface, route); err != nil {
+					logrus.Errorf("Could not add route %s: %s", route, err)
 				}
-				logrus.Infof("Route %s created.", route)
 			}
 
 			startTunnel := false
