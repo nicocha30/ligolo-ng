@@ -21,7 +21,7 @@ require (
 	github.com/gin-contrib/cors v1.7.2
 	github.com/gin-contrib/static v1.1.5
 	github.com/gin-gonic/gin v1.10.0
-	github.com/golang-jwt/jwt/v5 v5.2.1
+	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.4.0
 	github.com/nicocha30/gvisor-ligolo v0.0.0-20230726075806-989fa2c0a413
 	github.com/shamaton/msgpack/v2 v2.2.3
