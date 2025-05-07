@@ -18,9 +18,8 @@ package protocol
 
 import (
 	"fmt"
+	"github.com/shamaton/msgpack/v2"
 	"io"
-
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 // LigoloEncoder is the structure containing the writer used when encoding Envelopes
@@ -74,18 +73,16 @@ func payloadTypeFromInterface(payload interface{}) (uint8, error) {
 
 // Encode an Envelope packet and write the result into the writer
 func (e *LigoloEncoder) Encode(payload interface{}) error {
-	packer := msgpack.NewEncoder(e.writer)
-
 	payloadType, err := payloadTypeFromInterface(payload)
 	if err != nil {
 		return err
 	}
 
-	if err := packer.Encode(payloadType); err != nil {
+	if err := msgpack.MarshalWrite(e.writer, payloadType); err != nil {
 		return err
 	}
 
-	if err := packer.Encode(payload); err != nil {
+	if err := msgpack.MarshalWrite(e.writer, payload); err != nil {
 		return err
 	}
 

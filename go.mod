@@ -24,9 +24,9 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.4.0
 	github.com/nicocha30/gvisor-ligolo v0.0.0-20230726075806-989fa2c0a413
+	github.com/shamaton/msgpack/v2 v2.2.3
 	github.com/spf13/viper v1.19.0
 	github.com/vishvananda/netlink v1.1.1-0.20211118161826-650dca95af54
-	github.com/vmihailenco/msgpack/v5 v5.4.1
 	golang.org/x/sys v0.32.0
 	nhooyr.io/websocket v1.8.11
 )
@@ -75,7 +75,6 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae // indirect
-	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 	golang.org/x/arch v0.16.0 // indirect

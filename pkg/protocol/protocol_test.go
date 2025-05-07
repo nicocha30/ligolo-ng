@@ -48,3 +48,25 @@ func TestEncodeDecode(t *testing.T) {
 	}
 
 }
+
+func BenchmarkEncodeDecode(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		var buffer bytes.Buffer
+		baseEnvelope := InfoReplyPacket{Name: "hello"}
+		enc := NewEncoder(&buffer)
+		if err := enc.Encode(baseEnvelope); err != nil {
+			b.Fatal(err)
+		}
+
+		dec := NewDecoder(&buffer)
+		if err := dec.Decode(); err != nil {
+			if err != io.EOF {
+				b.Fatal(err)
+			}
+		}
+
+		if dec.Payload.(*InfoReplyPacket).Name != "hello" {
+			b.Fatal("invalid packet decoded")
+		}
+	}
+}
