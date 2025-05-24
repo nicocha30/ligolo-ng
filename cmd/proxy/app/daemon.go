@@ -365,11 +365,25 @@ func StartLigoloApi() {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid agent"})
 				return
 			}
-			if _, err := AgentList[listenerRequest.AgentID].AddListener(listenerRequest.ListenerAddr, listenerRequest.Network, listenerRequest.RedirectAddr); err != nil {
+			CurrentAgent := AgentList[listenerRequest.AgentID]
+			proxyListener, err := CurrentAgent.AddListener(listenerRequest.ListenerAddr, listenerRequest.Network, listenerRequest.RedirectAddr)
+			if err != nil {
 				c.Error(err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
+
+			go func() {
+				err := proxyListener.StartRelay()
+				if err != nil {
+					logrus.WithFields(logrus.Fields{"listener": proxyListener.String(), "agent": CurrentAgent.Name, "id": CurrentAgent.SessionID}).Error("Listener relay failed with error: ", err)
+					return
+				}
+
+				logrus.WithFields(logrus.Fields{"listener": proxyListener.String(), "agent": CurrentAgent.Name, "id": CurrentAgent.SessionID}).Warning("Listener ended without error.")
+				return
+			}()
+
 			c.JSON(http.StatusOK, gin.H{"message": "listener created"})
 		})
 

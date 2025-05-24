@@ -278,7 +278,12 @@ func HandleConn(conn net.Conn) {
 			if err := encoder.Encode(listenerResponse); err != nil {
 				logrus.Error(err)
 			}
-			go relay.StartRelay(conn, udplistener)
+			go func() {
+				err := relay.StartRelay(conn, udplistener)
+				if err != nil {
+					logrus.Error(err)
+				}
+			}()
 		}
 
 		listenerID++

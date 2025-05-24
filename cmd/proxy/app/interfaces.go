@@ -115,7 +115,7 @@ func init() {
 			if ifName == "" {
 				return errors.New("please specify a valid interface using --name [interface]")
 			}
-			if len(config.GetInterfaceRoutesConfig(ifName)) > 0 {
+			if config.GetInterfaceConfig(ifName) != nil {
 				if ask("Remove all interface routes and settings from config?") {
 					if err := config.DeleteInterfaceConfig(ifName); err != nil {
 						return err

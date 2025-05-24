@@ -203,9 +203,15 @@ func AddInterfaceConfig(ifName string) error {
 	return nil
 }
 
-func GetInterfaceRoutesConfig(ifName string) []string {
-	configPath := fmt.Sprintf("interface.%s.routes", ifName)
-	return Config.GetStringSlice(configPath)
+func GetInterfaceConfig(ifName string) *InterfaceConfig {
+	var ifaceInfo map[string]InterfaceConfig
+	// Unmarshal current interfaces config
+	Config.UnmarshalKey("interface", &ifaceInfo)
+	// Check if empty interface
+	if iface, ok := ifaceInfo[ifName]; ok {
+		return &iface
+	}
+	return nil
 }
 
 func DeleteInterfaceConfig(ifName string) error {
