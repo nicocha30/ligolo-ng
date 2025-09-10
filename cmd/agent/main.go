@@ -46,7 +46,22 @@ var (
 	date    = "unknown"
 )
 
+//Set for Header Flag var
+type headerFlags []string
+
+func (h *headerFlags) String() string {
+	return fmt.Sprint(*h)
+}
+
+func (h *headerFlags) Set(value string) error {
+	*h = append(*h, value)
+	return nil
+}
+
 func main() {
+	//Header inclusion
+	var headers headerFlags
+
 	var tlsConfig tls.Config
 	var ignoreCertificate = flag.Bool("ignore-cert", false, "ignore TLS certificate validation (dangerous), only for debug purposes")
 	var acceptFingerprint = flag.String("accept-fingerprint", "", "accept certificates matching the following SHA256 fingerprint (hex format)")
@@ -59,6 +74,7 @@ func main() {
 	var userAgent = flag.String("ua", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
 		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36", "HTTP User-Agent")
 	var versionFlag = flag.Bool("version", false, "show the current version")
+	flag.Var(&headers, "header", "Custom HTTP header in 'Key: Value' format (can be repeated)")
 
 	flag.Usage = func() {
 		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
@@ -113,7 +129,7 @@ func main() {
 		if serverUrl != nil && serverUrl.Scheme == "https" {
 			*serverAddr = strings.Replace(*serverAddr, "https://", "wss://", 1)
 			//websocket
-			err = wsconnect(&tlsConfig, *serverAddr, *socksProxy, *userAgent)
+			err = wsconnect(&tlsConfig, *serverAddr, *socksProxy, *userAgent, headers)
 		} else {
 			if *socksProxy != "" {
 				//suppose that scheme is socks:// or socks5://
@@ -223,7 +239,7 @@ func bind(config *tls.Config, bindAddr string) {
 	}
 }
 
-func wsconnect(config *tls.Config, wsaddr string, proxystr string, useragent string) error {
+func wsconnect(config *tls.Config, wsaddr string, proxystr string, useragent string, headers []string) error {
 
 	//timeout for websocket library connection - 20 seconds
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
@@ -248,7 +264,17 @@ func wsconnect(config *tls.Config, wsaddr string, proxystr string, useragent str
 	httpClient := &http.Client{Transport: httpTransport}
 	httpheader := &http.Header{}
 	httpheader.Add("User-Agent", useragent)
-
+	//include optional headers
+	for _, h := range headers {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+			httpheader.Set(key, value)
+		} else {
+			logrus.Warnf("Ignoring invalid header format: %s", h)
+		}
+	}
 	wsConn, _, err := websocket.Dial(ctx, wsaddr, &websocket.DialOptions{HTTPClient: httpClient, HTTPHeader: *httpheader})
 	if err != nil {
 		return err
