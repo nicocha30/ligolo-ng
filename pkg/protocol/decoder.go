@@ -77,15 +77,15 @@ func (d *LigoloDecoder) Decode() error {
 	var payloadType uint8
 	err := msgpack.UnmarshalRead(d.reader, &payloadType)
 	if err != nil {
-		return err
+		return fmt.Errorf("decoder: unable to decode payload type: %v", err)
 	}
 	p, err := interfaceFromPayloadType(payloadType)
 	if err != nil {
-		return err
+		return fmt.Errorf("decoder: unable to get interface from payload: %v", err)
 	}
 
 	if err := msgpack.UnmarshalRead(d.reader, p); err != nil {
-		return err
+		return fmt.Errorf("decoder: unable to decode payload: %v", err)
 	}
 	d.Payload = p
 

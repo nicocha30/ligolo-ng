@@ -127,7 +127,7 @@ func (la *LigoloAgent) MarshalJSON() ([]byte, error) {
 func NewAgent(session *yamux.Session) (*LigoloAgent, error) {
 	yamuxConnectionSession, err := session.Open()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not open yamux connection session: %v", err)
 	}
 
 	infoRequest := protocol.InfoRequestPacket{}
@@ -136,11 +136,11 @@ func NewAgent(session *yamux.Session) (*LigoloAgent, error) {
 	protocolDecoder := protocol.NewDecoder(yamuxConnectionSession)
 
 	if err := protocolEncoder.Encode(infoRequest); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewAgent: could not encode info request: %v", err)
 	}
 
 	if err := protocolDecoder.Decode(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewAgent: could not decode info reply: %v", err)
 	}
 
 	reply := protocolDecoder.Payload.(*protocol.InfoReplyPacket)

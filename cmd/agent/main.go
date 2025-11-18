@@ -26,11 +26,11 @@ import (
 	"flag"
 	"fmt"
 	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
+	"github.com/nicocha30/ligolo-ng/pkg/utils"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/yamux"
@@ -89,17 +89,12 @@ func main() {
 		logrus.Fatal("please, specify the target host user -connect host:port")
 	}
 
-	serverUrl, err := url.Parse(*serverAddr)
-	if err == nil && serverUrl != nil && serverUrl.Scheme == "https" {
-		tlsConfig.ServerName = serverUrl.Hostname()
-	} else {
-		//direct connection. try to parse as host:port
-		host, _, err := net.SplitHostPort(*serverAddr)
-		if err != nil {
-			logrus.Fatal("Invalid connect address, please use https://host:port for websocket or host:port for tcp")
-		}
-		tlsConfig.ServerName = host
+	ligoloUrl, err := utils.ParseLigoloURL(*serverAddr)
+	if err != nil {
+		logrus.Fatalf("Invalid connect address, please use http(s)://host:port for websocket or host:port for tcp")
 	}
+
+	tlsConfig.ServerName = ligoloUrl.Hostname()
 
 	if *ignoreCertificate {
 		logrus.Warn("warning, certificate validation disabled")
@@ -110,8 +105,7 @@ func main() {
 
 	for {
 		var err error
-		if serverUrl != nil && serverUrl.Scheme == "https" {
-			*serverAddr = strings.Replace(*serverAddr, "https://", "wss://", 1)
+		if ligoloUrl.IsWebsocket() {
 			//websocket
 			err = wsconnect(&tlsConfig, *serverAddr, *socksProxy, *userAgent)
 		} else {
@@ -150,9 +144,9 @@ func main() {
 					}
 				}
 				tlsConn := tls.Client(conn, &tlsConfig)
-
 				err = connect(tlsConn)
 			}
+
 		}
 
 		logrus.Errorf("Connection error: %v", err)
@@ -165,6 +159,7 @@ func main() {
 	}
 }
 
+// sockDial is used when connecting using direct connection through a socks5 proxy server.
 func sockDial(serverAddr string, socksProxy string, socksUser string, socksPass string) (net.Conn, error) {
 	proxyDialer, err := goproxy.SOCKS5("tcp", socksProxy, &goproxy.Auth{
 		User:     socksUser,
@@ -176,6 +171,7 @@ func sockDial(serverAddr string, socksProxy string, socksUser string, socksPass 
 	return proxyDialer.Dial("tcp", serverAddr)
 }
 
+// connect is used when connecting using direct connection.
 func connect(conn net.Conn) error {
 	yamuxConn, err := yamux.Server(conn, yamux.DefaultConfig())
 	if err != nil {
@@ -223,7 +219,8 @@ func bind(config *tls.Config, bindAddr string) {
 	}
 }
 
-func wsconnect(config *tls.Config, wsaddr string, proxystr string, useragent string) error {
+// wsconnect is used to connect using websockets.
+func wsconnect(config *tls.Config, wsaddr string, proxy string, useragent string) error {
 
 	//timeout for websocket library connection - 20 seconds
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
@@ -231,18 +228,28 @@ func wsconnect(config *tls.Config, wsaddr string, proxystr string, useragent str
 
 	//in case of websocket proxy can be http with login:pass
 	//Ex: proxystr = "http://admin:secret@127.0.0.1:8080"
-	proxyUrl, err := url.Parse(proxystr)
-	if err != nil || proxystr == "" {
-		proxyUrl = nil
+	var proxyUrl *url.URL
+	if proxy != "" {
+		var err error
+		proxyUrl, err = url.Parse(proxy)
+		if err != nil {
+			return fmt.Errorf("wsconnect: proxy url is invalid: %v", err)
+		}
 	}
 
-	httpTransport := &http.Transport{}
-	config.MinVersion = tls.VersionTLS10
+	wsUrl, err := utils.ParseLigoloURL(wsaddr)
+	if err != nil {
+		return fmt.Errorf("wsconnect: wsaddr is invalid: %v", err)
+	}
 
-	httpTransport = &http.Transport{
-		MaxIdleConns:    http.DefaultMaxIdleConnsPerHost,
-		TLSClientConfig: config,
-		Proxy:           http.ProxyURL(proxyUrl),
+	httpTransport := &http.Transport{
+		MaxIdleConns: http.DefaultMaxIdleConnsPerHost,
+		Proxy:        http.ProxyURL(proxyUrl),
+	}
+
+	if wsUrl.IsSecure() {
+		config.MinVersion = tls.VersionTLS11
+		httpTransport.TLSClientConfig = config
 	}
 
 	httpClient := &http.Client{Transport: httpTransport}
@@ -254,10 +261,10 @@ func wsconnect(config *tls.Config, wsaddr string, proxystr string, useragent str
 		return err
 	}
 
-	//timeout for netconn derived from websocket connection - it must be very big
-	netctx, cancel := context.WithTimeout(context.Background(), time.Hour*999999)
+	netctx, cancel := context.WithCancel(context.Background())
 	netConn := websocket.NetConn(netctx, wsConn, websocket.MessageBinary)
 	defer cancel()
+
 	yamuxConn, err := yamux.Server(netConn, yamux.DefaultConfig())
 	if err != nil {
 		return err

@@ -20,12 +20,13 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
+	"github.com/nicocha30/ligolo-ng/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"net"
 	"net/http"
 	"nhooyr.io/websocket"
-	"strings"
 )
 
 type Controller struct {
@@ -62,15 +63,25 @@ func (c *Controller) GetSelfCertificateSignature() (*tls.Certificate, error) {
 }
 
 func (c *Controller) ListenAndServe() {
-	tlsConfig, err := tlsutils.CertManager(c.CertManagerConfig)
+	url, err := utils.ParseLigoloURL(c.Address)
 	if err != nil {
 		c.startchan <- err
 	}
-	c.tlsConfig = tlsConfig
-
-	if strings.HasPrefix(c.Address, "https://") {
-		//SSL websocket protocol
-		listener, err := tls.Listen(c.Network, strings.Replace(c.Address, "https://", "", 1), c.tlsConfig)
+	if url.IsWebsocket() {
+		var listener net.Listener
+		// Websocket protocol
+		if url.Scheme == "http" || url.Scheme == "ws" {
+			logrus.Warning("Using insecure websockets")
+			listener, err = net.Listen(c.Network, url.Host)
+		} else {
+			tlsConfig, err := tlsutils.CertManager(c.CertManagerConfig)
+			if err != nil {
+				c.startchan <- err
+				return
+			}
+			c.tlsConfig = tlsConfig
+			listener, err = tls.Listen(c.Network, url.Host, c.tlsConfig)
+		}
 		if err != nil {
 			c.startchan <- err
 			return
@@ -82,7 +93,7 @@ func (c *Controller) ListenAndServe() {
 
 		s := &http.Server{
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				ws, err := websocket.Accept(w, r, nil)
+				ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{"*"}})
 				if err != nil {
 					logrus.Error(err)
 					return
@@ -93,16 +104,16 @@ func (c *Controller) ListenAndServe() {
 			}),
 		}
 		err = s.Serve(listener)
-	} else {
+	} else if url.IsValid() {
 		//direct listen with legacy ligolo-ng protocol
-		listener, err := tls.Listen(c.Network, c.Address, c.tlsConfig)
+		listener, err := tls.Listen(c.Network, url.Host, c.tlsConfig)
 		if err != nil {
 			c.startchan <- err
 			return
 		}
 		defer listener.Close()
 		c.startchan <- nil // Controller is listening.
-		logrus.Infof("Listening on %s", c.Address)
+		logrus.Infof("Listening on %s", url.Host)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
@@ -111,6 +122,8 @@ func (c *Controller) ListenAndServe() {
 			}
 			c.Connection <- conn
 		}
+	} else {
+		c.startchan <- fmt.Errorf("invalid listen address: %s", c.Address)
 	}
 	c.donechan <- nil
 }
