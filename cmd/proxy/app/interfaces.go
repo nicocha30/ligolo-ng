@@ -21,6 +21,9 @@ package app
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strings"
+
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/desertbit/grumble"
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -29,8 +32,6 @@ import (
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo"
 	"github.com/nicocha30/ligolo-ng/pkg/utils/codenames"
 	"github.com/sirupsen/logrus"
-	"net"
-	"strings"
 )
 
 func init() {
@@ -324,18 +325,45 @@ func init() {
 
 				logrus.Infof("Using interface name %s", ifName)
 				selectedIface = ifName
+
 			} else {
-				ifaces, err := net.Interfaces()
+				// Get interface configurations to show routes
+				interfaces, err := config.GetInterfaceConfigState()
 				if err != nil {
 					return err
 				}
-				var ifaceNames []string
-				for _, iface := range ifaces {
-					ifaceNames = append(ifaceNames, iface.Name)
+
+				var ifaceOptions []string
+				ifaceMap := make(map[string]string)
+				for ifName, ifInfo := range interfaces {
+					displayName := ifName
+					if len(ifInfo.Routes) > 0 {
+						// Get routes and display them in yellow
+						var routes []string
+						for _, route := range ifInfo.Routes {
+							routes = append(routes, route.Destination)
+						}
+						routeStr := strings.Join(routes, ", ")
+						yellowRoutes := text.Colors{text.FgYellow}.Sprintf(routeStr)
+						displayName = fmt.Sprintf("%s %s", ifName, yellowRoutes)
+					}
+					ifaceOptions = append(ifaceOptions, displayName)
+					ifaceMap[displayName] = ifName
 				}
-				if err := survey.AskOne(&survey.Select{Message: "Select the interface to use", Options: ifaceNames}, &selectedIface); err != nil {
+
+				if len(ifaceOptions) == 0 {
+					return errors.New("no interfaces available, create a new one first")
+				}
+
+				var selectedIfaceDisplay string
+				if err := survey.AskOne(&survey.Select{
+					Message: "Select the interface to use",
+					Options: ifaceOptions,
+				}, &selectedIfaceDisplay); err != nil {
 					return err
 				}
+
+				selectedIface = ifaceMap[selectedIfaceDisplay]
 			}
 
 			if err := config.AddInterfaceConfig(selectedIface); err != nil {
