@@ -19,6 +19,7 @@ package tlsutils
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/acme/autocert"
 	"net"
@@ -78,11 +79,11 @@ func CertManager(c *CertManagerConfig) (*tls.Config, error) {
 		cer, err := tls.LoadX509KeyPair(c.Certfile, c.Keyfile)
 		if err != nil {
 			logrus.WithFields(logrus.Fields{"certfile": c.Certfile, "keyfile": c.Keyfile}).Error("Could not load TLS certificate. Please make sure paths are correct or use -autocert or -selfcert options")
-			return nil, err
+			return nil, fmt.Errorf("CertManager: %v", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cer}
 	} else {
-		return nil, errors.New("No valid TLS configuration found, please use -certfile/-keyfile, -autocert or -selfcert options")
+		return nil, errors.New("CertManager: No valid TLS configuration found, please use -certfile/-keyfile, -autocert or -selfcert options")
 	}
 	return tlsConfig, nil
 }
