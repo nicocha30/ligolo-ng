@@ -54,6 +54,7 @@ func main() {
 	var hideBanner = flag.Bool("nobanner", false, "don't show banner on startup")
 	var configFile = flag.String("config", "", "the config file to use")
 	var daemonMode = flag.Bool("daemon", false, "run as daemon mode (no CLI)")
+	var apiListenAddr = flag.String("api-laddr", "", "API server listening address (default: 127.0.0.1:8080)")
 	var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
 	var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
 
@@ -79,6 +80,10 @@ func main() {
 	}
 
 	config.InitConfig(*configFile)
+
+	if *apiListenAddr != "" {
+		config.Config.Set("web.listen", *apiListenAddr)
+	}
 
 	if *versionFlag {
 		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)

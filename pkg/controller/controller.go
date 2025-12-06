@@ -106,6 +106,12 @@ func (c *Controller) ListenAndServe() {
 		err = s.Serve(listener)
 	} else if url.IsValid() {
 		//direct listen with legacy ligolo-ng protocol
+		tlsConfig, err := tlsutils.CertManager(c.CertManagerConfig)
+		if err != nil {
+			c.startchan <- err
+			return
+		}
+		c.tlsConfig = tlsConfig
 		listener, err := tls.Listen(c.Network, url.Host, c.tlsConfig)
 		if err != nil {
 			c.startchan <- err
