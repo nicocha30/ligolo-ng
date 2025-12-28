@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
@@ -106,16 +107,45 @@ func init() {
 		Name:      "interface_delete",
 		Aliases:   []string{"ifdel", "interface_del"},
 		Help:      "Delete a tuntap interface",
-		Usage:     "interface_delete --name [ifname]",
+		Usage:     "interface_delete [--name ifname | --id number]",
 		HelpGroup: "Interfaces",
 		Flags: func(f *grumble.Flags) {
-			f.StringL("name", "", "the interface name to delete")
+			f.String("n", "name", "", "the interface name to delete")
+			f.Int("i", "id", -1, "the interface ID to delete (from interface_list)")
 		},
 		Run: func(c *grumble.Context) error {
 			ifName := c.Flags.String("name")
-			if ifName == "" {
-				return errors.New("please specify a valid interface using --name [interface]")
+			ifID := c.Flags.Int("id")
+			
+			// If neither name nor ID provided, show error
+			if ifName == "" && ifID == -1 {
+				return errors.New("please specify either --name [interface] or --id [number]")
 			}
+			
+			// If ID is provided, look up the interface name
+			if ifID != -1 {
+				interfaces, err := config.GetInterfaceConfigState()
+				if err != nil {
+					return err
+				}
+				
+				// Convert map to slice to access by index
+				var interfaceNames []string
+				for name := range interfaces {
+					interfaceNames = append(interfaceNames, name)
+				}
+				
+				// Sort to ensure consistent ordering
+				sort.Strings(interfaceNames)
+				
+				if ifID < 0 || ifID >= len(interfaceNames) {
+					return fmt.Errorf("invalid interface ID: %d. Use 'interface_list' to see valid IDs", ifID)
+				}
+				
+				ifName = interfaceNames[ifID]
+				logrus.Infof("Deleting interface #%d: %s", ifID, ifName)
+			}
+			
 			if config.GetInterfaceConfig(ifName) != nil {
 				if ask("Remove all interface routes and settings from config?") {
 					if err := config.DeleteInterfaceConfig(ifName); err != nil {
@@ -183,11 +213,12 @@ func init() {
 		Name:      "route_del",
 		Aliases:   []string{"del_route", "interface_route_del", "interface_del_route"},
 		Help:      "Delete a route",
-		Usage:     "route_del --name [ifname] --route [cidr]",
+		Usage:     "route_del [--name ifname --route cidr | --id number]",
 		HelpGroup: "Interfaces",
 		Flags: func(f *grumble.Flags) {
-			f.StringL("name", "", "the interface name")
+			f.String("n", "name", "", "the interface name")
 			f.StringL("route", "", "the network cidr")
+			f.Int("i", "id", -1, "the route ID to delete (from interface_list, 0-indexed across all routes)")
 		},
 		Run: func(c *grumble.Context) error {
 
@@ -197,6 +228,68 @@ func init() {
 			}
 
 			routeCidr := c.Flags.String("route")
+			ifName := c.Flags.String("name")
+			routeID := c.Flags.Int("id")
+			
+			// If ID is provided, look up the route and interface
+			if routeID != -1 {
+				// Build a flat list of all routes with their interface names
+				type RouteEntry struct {
+					ifaceName string
+					route     string
+				}
+				var allRoutes []RouteEntry
+				
+				// Get interfaces in sorted order for consistent IDs
+				var ifaceNames []string
+				for name := range interfaces {
+					ifaceNames = append(ifaceNames, name)
+				}
+				sort.Strings(ifaceNames)
+				
+				for _, ifaceName := range ifaceNames {
+					ifInfo := interfaces[ifaceName]
+					for _, route := range ifInfo.Routes {
+						allRoutes = append(allRoutes, RouteEntry{
+							ifaceName: ifaceName,
+							route:     route.Destination,
+						})
+					}
+				}
+				
+				if routeID < 0 || routeID >= len(allRoutes) {
+					return fmt.Errorf("invalid route ID: %d. Total routes: %d", routeID, len(allRoutes))
+				}
+				
+				selectedRoute := allRoutes[routeID]
+				ifName = selectedRoute.ifaceName
+				routeCidr = selectedRoute.route
+				logrus.Infof("Deleting route #%d: %s on interface %s", routeID, routeCidr, ifName)
+				
+				// Delete the route
+				ifInfo := interfaces[ifName]
+				for _, route := range ifInfo.Routes {
+					if route.Destination == routeCidr {
+						if route.Active {
+							tun, err := netinfo.GetTunByName(ifName)
+							if err != nil {
+								return err
+							}
+							if err := tun.DelRoute(route.Destination); err != nil {
+								return fmt.Errorf("could not delete route %s: %s", route.Destination, err)
+							}
+						}
+						if err := config.DeleteRouteConfig(ifName, route.Destination); err != nil {
+							return fmt.Errorf("could not delete route %s from config: %s", route.Destination, err)
+						}
+						logrus.Info("Route deleted.")
+						return nil
+					}
+				}
+				return errors.New("route not found")
+			}
+			
+			// Original interactive or named route deletion logic
 			if routeCidr == "" {
 				var possibleRoutes []string
 				for ifName, ifInfo := range interfaces {
@@ -240,7 +333,7 @@ func init() {
 				}
 				return nil
 			}
-			ifName := c.Flags.String("name")
+			
 			if ifName == "" {
 				// Attempt to search for route.
 				ifByRoute, err := netinfo.GetTunByRoute(routeCidr)
