@@ -54,10 +54,17 @@ func init() {
 				return err
 			}
 
-			var i int
-			for tapName, tapInfo := range interfaces {
+			// Sort interface names for consistent ordering
+			var interfaceNames []string
+			for name := range interfaces {
+				interfaceNames = append(interfaceNames, name)
+			}
+			sort.Strings(interfaceNames)
+
+			// Build table with sorted interfaces
+			for i, tapName := range interfaceNames {
+				tapInfo := interfaces[tapName]
 				t.AppendRow(table.Row{i, tapName, tapInfo.GetRouteString(), tapInfo.GetStateString()})
-				i++
 			}
 			App.Println(t.Render())
 			App.Println(text.Colors{text.FgYellow}.Sprintf("Interfaces and routes with \"Pending\" state will be created on tunnel start."))
@@ -129,13 +136,11 @@ func init() {
 					return err
 				}
 				
-				// Convert map to slice to access by index
+				// Sort interface names to match interface_list ordering
 				var interfaceNames []string
 				for name := range interfaces {
 					interfaceNames = append(interfaceNames, name)
 				}
-				
-				// Sort to ensure consistent ordering
 				sort.Strings(interfaceNames)
 				
 				if ifID < 0 || ifID >= len(interfaceNames) {
@@ -210,6 +215,68 @@ func init() {
 	})
 
 	App.AddCommand(&grumble.Command{
+		Name:      "route_list",
+		Aliases:   []string{"routes"},
+		Help:      "List all routes across all interfaces",
+		Usage:     "route_list",
+		HelpGroup: "Interfaces",
+		Run: func(c *grumble.Context) error {
+			interfaces, err := config.GetInterfaceConfigState()
+			if err != nil {
+				return err
+			}
+
+			t := table.NewWriter()
+			t.SetStyle(table.StyleLight)
+			t.SetTitle("Route list")
+			t.AppendHeader(table.Row{"#", "Interface", "Route", "State"})
+
+			// Build a flat list of all routes with their interface names
+			type RouteEntry struct {
+				ifaceName string
+				route     string
+				active    bool
+			}
+			var allRoutes []RouteEntry
+
+			// Get interfaces in sorted order for consistent IDs
+			var ifaceNames []string
+			for name := range interfaces {
+				ifaceNames = append(ifaceNames, name)
+			}
+			sort.Strings(ifaceNames)
+
+			for _, ifaceName := range ifaceNames {
+				ifInfo := interfaces[ifaceName]
+				for _, route := range ifInfo.Routes {
+					allRoutes = append(allRoutes, RouteEntry{
+						ifaceName: ifaceName,
+						route:     route.Destination,
+						active:    route.Active,
+					})
+				}
+			}
+
+			// Display routes with index
+			for i, entry := range allRoutes {
+				state := "Pending"
+				if entry.active {
+					state = "Active"
+				}
+				t.AppendRow(table.Row{i, entry.ifaceName, entry.route, state})
+			}
+
+			if len(allRoutes) == 0 {
+				App.Println("No routes configured.")
+				return nil
+			}
+
+			App.Println(t.Render())
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
 		Name:      "route_del",
 		Aliases:   []string{"del_route", "interface_route_del", "interface_del_route"},
 		Help:      "Delete a route",
@@ -218,7 +285,7 @@ func init() {
 		Flags: func(f *grumble.Flags) {
 			f.String("n", "name", "", "the interface name")
 			f.StringL("route", "", "the network cidr")
-			f.Int("i", "id", -1, "the route ID to delete (from interface_list, 0-indexed across all routes)")
+			f.Int("i", "id", -1, "the route ID to delete (from route_list, 0-indexed across all routes)")
 		},
 		Run: func(c *grumble.Context) error {
 
