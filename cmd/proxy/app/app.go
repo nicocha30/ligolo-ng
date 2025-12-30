@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/desertbit/grumble"
@@ -82,41 +83,50 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 			}
 			logrus.Infof("Recovered an agent: %s", registeredAgents.Name)
 			recovered = true
+
 			registeredAgents.Session = agent.Session
+
 			if registeredAgents.Running {
-				if err := StartTunnel(registeredAgents, registeredAgents.Interface); err != nil {
-					logrus.Errorf("unable to start tunnel recovery for agent %s: %v", agent.SessionID, err)
+				// FIXED: Force reset zombie tunnel state and clean up interface
+				savedInterface := registeredAgents.Interface
+				
+				logrus.Infof("Restoring tunnel for agent %s on interface %s", registeredAgents.Name, savedInterface)
+				
+				// Force reset the Running flag (tunnel watchdog doesn't do this)
+				registeredAgents.Running = false
+				registeredAgents.Interface = ""
+				
+				// Destroy the physical interface if it exists
+				if netinfo.InterfaceExist(savedInterface) {
+					if stun, err := netinfo.GetTunByName(savedInterface); err == nil {
+						if err := stun.Destroy(); err != nil {
+							logrus.Warnf("Could not remove interface %s: %v", savedInterface, err)
+						}
+					}
+				}
+				
+				// Small delay to ensure cleanup completes
+				time.Sleep(100 * time.Millisecond)
+				
+				// Now start fresh tunnel
+				if err := StartTunnel(registeredAgents, savedInterface); err != nil {
+					logrus.Errorf("Failed to restore tunnel for agent %s: %v", agent.SessionID, err)
 				}
 			}
 
-			for lid, listener := range registeredAgents.Listeners {
-				logrus.Infof("Restarting listener: %s", listener.String())
-				if err := listener.ResetMultiplexer(registeredAgents.Session); err != nil {
-					logrus.Errorf("Failed to reset yamux: %v", err)
-				}
-				if err := listener.Stop(); err != nil {
-					logrus.Error(err)
-				}
-
-				lis, err := proxy.NewListener(registeredAgents.Session, listener.ListenerAddr(), listener.Network(), listener.RedirectAddr())
-				if err != nil {
-					logrus.Error(err)
-				}
-				registeredAgents.Listeners[lid] = &lis
-				go func() {
-					err := lis.StartRelay()
-					if err != nil {
-						logrus.WithFields(logrus.Fields{"listener": lis.String(), "agent": agent.Name, "id": agent.SessionID}).Error("Listener relay failed with error: ", err)
-						return
+			// FIXED: Restart listeners with proper validation
+			for _, listener := range registeredAgents.Listeners {
+				if listener != nil {
+					logrus.Infof("Restoring listener: %s", listener.String())
+					if err := listener.ResetMultiplexer(registeredAgents.Session); err != nil {
+						logrus.Warnf("Failed to restore listener %s: %v", listener.String(), err)
 					}
-
-					logrus.WithFields(logrus.Fields{"listener": lis.String(), "agent": agent.Name, "id": agent.SessionID}).Warning("Listener ended without error.")
-					return
-				}()
+				}
 			}
 			return nil
 		}
 	}
+
 	if !recovered {
 		if config.Config.GetBool(fmt.Sprintf("agent.%s.autobind", agent.SessionID)) {
 			autobindInterface := config.Config.GetString(fmt.Sprintf("agent.%s.interface", agent.SessionID))
@@ -128,6 +138,7 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 	}
 	AgentCounter++
 	AgentList[AgentCounter] = agent
+
 	return nil
 }
 
@@ -648,3 +659,4 @@ func Run() {
 		},
 	})
 }
+
