@@ -101,7 +101,7 @@ func main() {
 		tlsConfig.InsecureSkipVerify = true
 	}
 
-	// CHANGED: Auto-retry is now enabled by default in connect mode (not bind mode)
+	// Auto-retry is enabled by default in connect mode (not bind mode)
 	// User can still disable it with -retry=false if needed
 	autoRetry := *retry
 	if *bindAddr == "" && !*retry {
@@ -181,11 +181,14 @@ func sockDial(serverAddr string, socksProxy string, socksUser string, socksPass 
 
 // connect is used when connecting using direct connection.
 func connect(conn net.Conn) error {
-	// FIXED: Configure yamux with better timeout settings to prevent keepalive failures
+	// Configure yamux with longer timeouts for multi-hop scenarios
 	yamuxConfig := yamux.DefaultConfig()
 	yamuxConfig.EnableKeepAlive = true
-	yamuxConfig.KeepAliveInterval = 30 * time.Second      // Send keepalive every 30 seconds (increased from default)
-	yamuxConfig.ConnectionWriteTimeout = 60 * time.Second // Wait 60 seconds for write (increased from 10s default)
+	yamuxConfig.KeepAliveInterval = 60 * time.Second       // Increased from 30s
+	yamuxConfig.ConnectionWriteTimeout = 120 * time.Second // Increased from 60s
+	
+	// Add max stream window size to handle buffering better in double-hop
+	yamuxConfig.MaxStreamWindowSize = 16 * 1024 * 1024 // 16MB window
 	
 	yamuxConn, err := yamux.Server(conn, yamuxConfig)
 	if err != nil {
@@ -235,7 +238,6 @@ func bind(config *tls.Config, bindAddr string) {
 
 // wsconnect is used to connect using websockets.
 func wsconnect(config *tls.Config, wsaddr string, proxy string, useragent string) error {
-
 	//timeout for websocket library connection - 20 seconds
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
 	defer cancel()
@@ -279,11 +281,12 @@ func wsconnect(config *tls.Config, wsaddr string, proxy string, useragent string
 	netConn := websocket.NetConn(netctx, wsConn, websocket.MessageBinary)
 	defer cancel()
 
-	// FIXED: Configure yamux with better timeout settings for websocket connections too
+	// FIXED: Configure yamux with better timeout settings for websocket double-hop too
 	yamuxConfig := yamux.DefaultConfig()
 	yamuxConfig.EnableKeepAlive = true
-	yamuxConfig.KeepAliveInterval = 30 * time.Second
-	yamuxConfig.ConnectionWriteTimeout = 60 * time.Second
+	yamuxConfig.KeepAliveInterval = 60 * time.Second       // Increased
+	yamuxConfig.ConnectionWriteTimeout = 120 * time.Second // Increased
+	yamuxConfig.MaxStreamWindowSize = 16 * 1024 * 1024     // 16MB window
 
 	yamuxConn, err := yamux.Server(netConn, yamuxConfig)
 	if err != nil {
