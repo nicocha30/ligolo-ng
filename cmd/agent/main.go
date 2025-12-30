@@ -101,6 +101,14 @@ func main() {
 		tlsConfig.InsecureSkipVerify = true
 	}
 
+	// CHANGED: Auto-retry is now enabled by default in connect mode (not bind mode)
+	// User can still disable it with -retry=false if needed
+	autoRetry := *retry
+	if *bindAddr == "" && !*retry {
+		// Enable auto-retry by default for connect mode
+		autoRetry = true
+	}
+
 	var conn net.Conn
 
 	for {
@@ -150,7 +158,7 @@ func main() {
 		}
 
 		logrus.Errorf("Connection error: %v", err)
-		if *retry {
+		if autoRetry {
 			logrus.Info("Retrying in 5 seconds.")
 			time.Sleep(5 * time.Second)
 		} else {
@@ -173,7 +181,13 @@ func sockDial(serverAddr string, socksProxy string, socksUser string, socksPass 
 
 // connect is used when connecting using direct connection.
 func connect(conn net.Conn) error {
-	yamuxConn, err := yamux.Server(conn, yamux.DefaultConfig())
+	// FIXED: Configure yamux with better timeout settings to prevent keepalive failures
+	yamuxConfig := yamux.DefaultConfig()
+	yamuxConfig.EnableKeepAlive = true
+	yamuxConfig.KeepAliveInterval = 30 * time.Second      // Send keepalive every 30 seconds (increased from default)
+	yamuxConfig.ConnectionWriteTimeout = 60 * time.Second // Wait 60 seconds for write (increased from 10s default)
+	
+	yamuxConn, err := yamux.Server(conn, yamuxConfig)
 	if err != nil {
 		return err
 	}
@@ -265,7 +279,13 @@ func wsconnect(config *tls.Config, wsaddr string, proxy string, useragent string
 	netConn := websocket.NetConn(netctx, wsConn, websocket.MessageBinary)
 	defer cancel()
 
-	yamuxConn, err := yamux.Server(netConn, yamux.DefaultConfig())
+	// FIXED: Configure yamux with better timeout settings for websocket connections too
+	yamuxConfig := yamux.DefaultConfig()
+	yamuxConfig.EnableKeepAlive = true
+	yamuxConfig.KeepAliveInterval = 30 * time.Second
+	yamuxConfig.ConnectionWriteTimeout = 60 * time.Second
+
+	yamuxConn, err := yamux.Server(netConn, yamuxConfig)
 	if err != nil {
 		return err
 	}
