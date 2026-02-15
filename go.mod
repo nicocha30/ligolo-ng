@@ -16,6 +16,7 @@ require (
 )
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/gin-contrib/cors v1.7.2
 	github.com/gin-contrib/static v1.1.5
 	github.com/gin-gonic/gin v1.10.0
@@ -26,7 +27,6 @@ require (
 	github.com/spf13/viper v1.19.0
 	github.com/vishvananda/netlink v1.1.1-0.20211118161826-650dca95af54
 	golang.org/x/sys v0.41.0
-	nhooyr.io/websocket v1.8.11
 )
 
 require (

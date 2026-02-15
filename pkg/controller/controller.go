@@ -21,12 +21,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
+
+	"github.com/coder/websocket"
 	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
 	"github.com/nicocha30/ligolo-ng/pkg/utils"
 	"github.com/sirupsen/logrus"
-	"net"
-	"net/http"
-	"nhooyr.io/websocket"
 )
 
 type Controller struct {

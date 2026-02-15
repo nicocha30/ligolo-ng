@@ -25,19 +25,20 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
-	"github.com/nicocha30/ligolo-ng/pkg/utils"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"time"
 
+	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
+	"github.com/nicocha30/ligolo-ng/pkg/utils"
+
+	"github.com/coder/websocket"
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/ligolo-ng/pkg/agent"
 	"github.com/sirupsen/logrus"
 	goproxy "golang.org/x/net/proxy"
-	"nhooyr.io/websocket"
 )
 
 var (
@@ -122,7 +123,7 @@ func main() {
 	for {
 		var err error
 		var connSuccess bool
-		
+
 		if ligoloUrl.IsWebsocket() {
 			//websocket
 			connSuccess, err = wsconnect(&tlsConfig, *serverAddr, *socksProxy, *userAgent)
@@ -165,7 +166,7 @@ func main() {
 				connSuccess, err = connect(tlsConn)
 			}
 		}
-		
+
 		// If connection was successful at any point, mark it as established
 		if connSuccess {
 			connectionEstablished = true
@@ -198,14 +199,14 @@ func main() {
 					reconnectStartTime = time.Now()
 					reconnectAttempt = 0
 				}
-				
+
 				reconnectAttempt++
 				elapsed := time.Since(reconnectStartTime)
-				
+
 				if elapsed.Seconds() >= float64(*reconnectTimeout) {
 					logrus.Fatalf("Reconnection timeout reached after %d attempts over %.0f seconds. Giving up.", reconnectAttempt, elapsed.Seconds())
 				}
-				
+
 				logrus.Infof("Reconnection attempt %d (elapsed: %.0fs/%.0fs). Waiting %d seconds...", reconnectAttempt, elapsed.Seconds(), float64(*reconnectTimeout), *reconnectDelay)
 				time.Sleep(time.Duration(*reconnectDelay) * time.Second)
 			} else {
@@ -235,18 +236,18 @@ func connect(conn net.Conn) (bool, error) {
 	yamuxConfig.KeepAliveInterval = 60 * time.Second       // Increased from 30s
 	yamuxConfig.ConnectionWriteTimeout = 120 * time.Second // Increased from 60s
 	yamuxConfig.MaxStreamWindowSize = 16 * 1024 * 1024     // 16MB window
-	
+
 	yamuxConn, err := yamux.Server(conn, yamuxConfig)
 	if err != nil {
 		return false, err
 	}
 
 	logrus.WithFields(logrus.Fields{"addr": conn.RemoteAddr()}).Info("Connection established")
-	
+
 	for {
 		conn, err := yamuxConn.Accept()
 		if err != nil {
-			return true, err  // Connection was established but now lost
+			return true, err // Connection was established but now lost
 		}
 		go agent.HandleConn(conn)
 	}
@@ -346,7 +347,7 @@ func wsconnect(config *tls.Config, wsaddr string, proxy string, useragent string
 	for {
 		conn, err := yamuxConn.Accept()
 		if err != nil {
-			return true, err  // Connection was established but now lost
+			return true, err // Connection was established but now lost
 		}
 		go agent.HandleConn(conn)
 	}
