@@ -51,13 +51,15 @@ func main() {
 	var ignoreCertificate = flag.Bool("ignore-cert", false, "ignore TLS certificate validation (dangerous), only for debug purposes")
 	var acceptFingerprint = flag.String("accept-fingerprint", "", "accept certificates matching the following SHA256 fingerprint (hex format)")
 	var verbose = flag.Bool("v", false, "enable verbose mode")
-	var retry = flag.Bool("retry", false, "auto-retry on error")
-	var socksProxy = flag.String("proxy", "", "proxy URL address (http://admin:secret@127.0.0.1:8080)"+
-		" or socks://admin:secret@127.0.0.1:8080")
+	var retry = flag.Bool("retry", false, "auto-retry on initial connection error")
+	var retryDelay = flag.Int("retry-delay", 5, "retry delay in seconds for initial connection (default: 5)")
+	var reconnect = flag.Bool("reconnect", true, "auto-reconnect after established connection is lost")
+	var reconnectDelay = flag.Int("reconnect-delay", 20, "reconnection delay in seconds (default: 20)")
+	var reconnectTimeout = flag.Int("reconnect-timeout", 300, "total reconnection timeout in seconds (default: 300 = 5 minutes)")
+	var socksProxy = flag.String("proxy", "", "proxy URL address (http://admin:secret@127.0.0.1:8080) or socks://admin:secret@127.0.0.1:8080")
 	var serverAddr = flag.String("connect", "", "connect to proxy (domain:port)")
 	var bindAddr = flag.String("bind", "", "bind to ip:port")
-	var userAgent = flag.String("ua", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
-		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36", "HTTP User-Agent")
+	var userAgent = flag.String("ua", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36", "HTTP User-Agent")
 	var versionFlag = flag.Bool("version", false, "show the current version")
 
 	flag.Usage = func() {
@@ -101,13 +103,29 @@ func main() {
 		tlsConfig.InsecureSkipVerify = true
 	}
 
+	// Validate retry and reconnect delays
+	if *retryDelay < 1 {
+		logrus.Fatal("retry-delay must be at least 1 second")
+	}
+	if *reconnectDelay < 1 {
+		logrus.Fatal("reconnect-delay must be at least 1 second")
+	}
+	if *reconnectTimeout < *reconnectDelay {
+		logrus.Fatal("reconnect-timeout must be greater than reconnect-delay")
+	}
+
 	var conn net.Conn
+	connectionEstablished := false
+	var reconnectStartTime time.Time
+	var reconnectAttempt int
 
 	for {
 		var err error
+		var connSuccess bool
+		
 		if ligoloUrl.IsWebsocket() {
 			//websocket
-			err = wsconnect(&tlsConfig, *serverAddr, *socksProxy, *userAgent)
+			connSuccess, err = wsconnect(&tlsConfig, *serverAddr, *socksProxy, *userAgent)
 		} else {
 			if *socksProxy != "" {
 				//suppose that scheme is socks:// or socks5://
@@ -133,9 +151,9 @@ func main() {
 					tlsConfig.InsecureSkipVerify = true
 					tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 						crtFingerprint := sha256.Sum256(rawCerts[0])
-						crtMatch, err := hex.DecodeString(*acceptFingerprint)
-						if err != nil {
-							return fmt.Errorf("invalid cert fingerprint: %v\n", err)
+						crtMatch, decodeErr := hex.DecodeString(*acceptFingerprint)
+						if decodeErr != nil {
+							return fmt.Errorf("invalid cert fingerprint: %v\n", decodeErr)
 						}
 						if bytes.Compare(crtMatch, crtFingerprint[:]) != 0 {
 							return fmt.Errorf("certificate does not match fingerprint: %X != %X", crtFingerprint, crtMatch)
@@ -144,17 +162,55 @@ func main() {
 					}
 				}
 				tlsConn := tls.Client(conn, &tlsConfig)
-				err = connect(tlsConn)
+				connSuccess, err = connect(tlsConn)
 			}
-
+		}
+		
+		// If connection was successful at any point, mark it as established
+		if connSuccess {
+			connectionEstablished = true
+			// Reset reconnection tracking when successfully connected
+			reconnectStartTime = time.Time{}
+			reconnectAttempt = 0
 		}
 
-		logrus.Errorf("Connection error: %v", err)
-		if *retry {
-			logrus.Info("Retrying in 5 seconds.")
-			time.Sleep(5 * time.Second)
+		// If we reach here, there was an error
+		if err != nil {
+			logrus.Errorf("Connection error: %v", err)
+		}
+
+		// Determine retry/reconnect behavior
+		if !connectionEstablished {
+			// Initial connection attempt failed
+			if *retry {
+				logrus.Infof("Retrying initial connection in %d seconds.", *retryDelay)
+				time.Sleep(time.Duration(*retryDelay) * time.Second)
+				continue
+			} else {
+				logrus.Fatal("Initial connection failed. Use -retry flag to enable automatic retry.")
+			}
 		} else {
-			logrus.Fatal(err)
+			// Connection was previously established but now lost
+			if *reconnect {
+				// Initialize reconnection tracking on first reconnect attempt
+				if reconnectStartTime.IsZero() {
+					logrus.Warn("Connection lost. Attempting to reconnect...")
+					reconnectStartTime = time.Now()
+					reconnectAttempt = 0
+				}
+				
+				reconnectAttempt++
+				elapsed := time.Since(reconnectStartTime)
+				
+				if elapsed.Seconds() >= float64(*reconnectTimeout) {
+					logrus.Fatalf("Reconnection timeout reached after %d attempts over %.0f seconds. Giving up.", reconnectAttempt, elapsed.Seconds())
+				}
+				
+				logrus.Infof("Reconnection attempt %d (elapsed: %.0fs/%.0fs). Waiting %d seconds...", reconnectAttempt, elapsed.Seconds(), float64(*reconnectTimeout), *reconnectDelay)
+				time.Sleep(time.Duration(*reconnectDelay) * time.Second)
+			} else {
+				logrus.Fatal("Connection lost and reconnect is disabled.")
+			}
 		}
 	}
 }
@@ -172,18 +228,25 @@ func sockDial(serverAddr string, socksProxy string, socksUser string, socksPass 
 }
 
 // connect is used when connecting using direct connection.
-func connect(conn net.Conn) error {
-	yamuxConn, err := yamux.Server(conn, yamux.DefaultConfig())
+func connect(conn net.Conn) (bool, error) {
+	// Configure yamux with longer timeouts for multi-hop scenarios
+	yamuxConfig := yamux.DefaultConfig()
+	yamuxConfig.EnableKeepAlive = true
+	yamuxConfig.KeepAliveInterval = 60 * time.Second       // Increased from 30s
+	yamuxConfig.ConnectionWriteTimeout = 120 * time.Second // Increased from 60s
+	yamuxConfig.MaxStreamWindowSize = 16 * 1024 * 1024     // 16MB window
+	
+	yamuxConn, err := yamux.Server(conn, yamuxConfig)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	logrus.WithFields(logrus.Fields{"addr": conn.RemoteAddr()}).Info("Connection established")
-
+	
 	for {
 		conn, err := yamuxConn.Accept()
 		if err != nil {
-			return err
+			return true, err  // Connection was established but now lost
 		}
 		go agent.HandleConn(conn)
 	}
@@ -213,15 +276,17 @@ func bind(config *tls.Config, bindAddr string) {
 		logrus.Infof("Got connection from: %s\n", conn.RemoteAddr())
 		tlsConn := tls.Server(conn, config)
 
-		if err := connect(tlsConn); err != nil {
+		if connSuccess, err := connect(tlsConn); err != nil {
 			logrus.Error(err)
+		} else if connSuccess {
+			// This shouldn't happen as connect only returns on error, but for safety
+			logrus.Info("Connection closed normally")
 		}
 	}
 }
 
 // wsconnect is used to connect using websockets.
-func wsconnect(config *tls.Config, wsaddr string, proxy string, useragent string) error {
-
+func wsconnect(config *tls.Config, wsaddr string, proxy string, useragent string) (bool, error) {
 	//timeout for websocket library connection - 20 seconds
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
 	defer cancel()
@@ -233,13 +298,13 @@ func wsconnect(config *tls.Config, wsaddr string, proxy string, useragent string
 		var err error
 		proxyUrl, err = url.Parse(proxy)
 		if err != nil {
-			return fmt.Errorf("wsconnect: proxy url is invalid: %v", err)
+			return false, fmt.Errorf("wsconnect: proxy url is invalid: %v", err)
 		}
 	}
 
 	wsUrl, err := utils.ParseLigoloURL(wsaddr)
 	if err != nil {
-		return fmt.Errorf("wsconnect: wsaddr is invalid: %v", err)
+		return false, fmt.Errorf("wsconnect: wsaddr is invalid: %v", err)
 	}
 
 	httpTransport := &http.Transport{
@@ -258,23 +323,30 @@ func wsconnect(config *tls.Config, wsaddr string, proxy string, useragent string
 
 	wsConn, _, err := websocket.Dial(ctx, wsaddr, &websocket.DialOptions{HTTPClient: httpClient, HTTPHeader: *httpheader})
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	netctx, cancel := context.WithCancel(context.Background())
 	netConn := websocket.NetConn(netctx, wsConn, websocket.MessageBinary)
 	defer cancel()
 
-	yamuxConn, err := yamux.Server(netConn, yamux.DefaultConfig())
+	// FIXED: Configure yamux with better timeout settings for websocket double-hop too
+	yamuxConfig := yamux.DefaultConfig()
+	yamuxConfig.EnableKeepAlive = true
+	yamuxConfig.KeepAliveInterval = 60 * time.Second       // Increased
+	yamuxConfig.ConnectionWriteTimeout = 120 * time.Second // Increased
+	yamuxConfig.MaxStreamWindowSize = 16 * 1024 * 1024     // 16MB window
+
+	yamuxConn, err := yamux.Server(netConn, yamuxConfig)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	logrus.Info("Websocket connection established")
 	for {
 		conn, err := yamuxConn.Accept()
 		if err != nil {
-			return err
+			return true, err  // Connection was established but now lost
 		}
 		go agent.HandleConn(conn)
 	}
