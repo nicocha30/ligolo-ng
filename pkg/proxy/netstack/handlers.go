@@ -17,6 +17,7 @@
 package netstack
 
 import (
+	"fmt"
 	"io"
 	"net"
 
@@ -114,10 +115,12 @@ func HandlePacket(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Sessi
 		Mask: []byte{0xf0, 0x00, 0x00, 0x00},
 	}
 
-	if magicNet.Contains(net.ParseIP(targetIp)) {
+	if ip := net.ParseIP(targetIp).To4(); ip != nil && magicNet.Contains(ip) {
 		logrus.Debug("MagicIP detected, redirecting to agent local machine")
-		// Magic IP detected
-		targetIp = "127.0.0.1"
+
+		// Dynamically map the IP within the 127.x.x.x range
+		targetIp = fmt.Sprintf("127.%d.%d.%d", ip[1], ip[2], ip[3])
+		logrus.Debugf("Mapped MagicIP to: %s", targetIp)
 	}
 
 	yamuxConnectionSession, err := yamuxConn.Open()
