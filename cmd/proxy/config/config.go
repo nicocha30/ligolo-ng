@@ -169,32 +169,52 @@ func ask(question string) bool {
 
 func InitConfig(configFile string) {
 	var firstStart bool
-	if configFile == "" {
-		configFile = "ligolo-ng.yaml"
-	} else {
+	if configFile != "" {
+		// Explicit path: verify it exists and use SetConfigFile so that
+		// both ReadInConfig and WriteConfig operate on the same path.
+		// Using SetConfigName with a full path works accidentally on read
+		// but causes WriteConfig to panic because it searches only the
+		// registered AddConfigPath directories for the stem.
 		if _, err := os.Stat(configFile); errors.Is(err, os.ErrNotExist) {
 			logrus.Fatal("config file does not exist")
 		}
+		Config.SetConfigFile(configFile)
+	} else {
+		// No explicit path — search standard locations.
+		Config.SetConfigName("ligolo-ng")
+		Config.SetConfigType("yaml")
+		Config.AddConfigPath(".")
+		Config.AddConfigPath(os.ExpandEnv("$HOME/.ligolo-proxy"))
+		Config.AddConfigPath("/etc/ligolo-proxy")
 	}
-	Config.SetConfigName(configFile)
-	Config.SetConfigType("yaml")
-	Config.AddConfigPath(".")
-	Config.AddConfigPath("$HOME/.ligolo-proxy")
-	Config.AddConfigPath("/etc/ligolo-proxy")
 
-	logrus.Infof("Loading configuration file %s", configFile)
+	if configFile != "" {
+		logrus.Infof("Loading configuration file %s", configFile)
+	} else {
+		logrus.Info("Searching for configuration file in standard paths")
+	}
 	if err := Config.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			if configFile != "" {
+				logrus.Fatalf("config file disappeared after validation: %s", configFile)
+			}
 			logrus.Warn("daemon configuration file not found. Creating a new one...")
-			f, err := os.Create(configFile)
+			// Create the file in ~/.ligolo-proxy so WriteConfig always has a
+			// known path regardless of the working directory.
+			defaultDir := os.ExpandEnv("$HOME/.ligolo-proxy")
+			defaultPath := defaultDir + "/ligolo-ng.yaml"
+			if err := os.MkdirAll(defaultDir, 0700); err != nil {
+				panic(err)
+			}
+			f, err := os.Create(defaultPath)
 			firstStart = true
 			if err != nil {
 				panic(err)
 			}
-			err = f.Close()
-			if err != nil {
+			if err = f.Close(); err != nil {
 				panic(err)
 			}
+			Config.SetConfigFile(defaultPath)
 		} else {
 			panic(err)
 		}
