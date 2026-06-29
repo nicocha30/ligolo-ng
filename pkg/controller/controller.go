@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -24,9 +24,9 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/allsmog/ligolo-ng-relay/pkg/tlsutils"
+	"github.com/allsmog/ligolo-ng-relay/pkg/utils"
 	"github.com/coder/websocket"
-	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
-	"github.com/nicocha30/ligolo-ng/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 

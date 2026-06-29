@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -18,7 +18,7 @@ package netinfo
 
 import (
 	"errors"
-	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo/winroute"
+	"github.com/allsmog/ligolo-ng-relay/pkg/proxy/netinfo/winroute"
 	"golang.zx2c4.com/wintun"
 	"net"
 )

@@ -1,27 +1,35 @@
-# Ligolo-ng : Tunneling like a VPN
+# Ligolo-ng Relay : Tunneling like a VPN
 
 ![Ligolo Logo](doc/logo.png)
 
-An advanced, yet simple, tunneling tool that uses TUN interfaces.
+An advanced, yet simple, tunneling tool that uses TUN interfaces — extended for
+**multi-hop pivoting** through deeply segmented networks.
 
 [![GPLv3](https://img.shields.io/badge/License-GPLv3-brightgreen.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Go Report](https://goreportcard.com/badge/github.com/nicocha30/ligolo-ng)](https://goreportcard.com/report/github.com/nicocha30/ligolo-ng)
-[![GitHub Sponsors](https://img.shields.io/github/sponsors/nicocha30)](https://github.com/sponsors/nicocha30)
-![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/nicocha30/ligolo-ng/total)
 
-[📑 Ligolo-ng Documentation (Setup/Quickstart)](https://docs.ligolo.ng/)
+> **Ligolo-ng Relay is a maintained fork of
+> [upstream Ligolo-ng](https://github.com/nicocha30/ligolo-ng).** It adds recursive relay
+> chains, so an agent can act as a lightweight TLS relay for downstream agents
+> that cannot reach the proxy directly, plus ICMP Port Unreachable responses that
+> make UDP scans return instantly instead of timing out. See
+> **[ENHANCEMENTS.md](ENHANCEMENTS.md)** for details and usage.
+> The exact fork delta is tracked in **[FORK-DELTA.md](FORK-DELTA.md)**, and the
+> relay path can be verified with `make relay-test`.
+>
+> Setup, quickstart, and core usage are unchanged from upstream — the upstream
+> [upstream Ligolo-ng Documentation](https://docs.ligolo.ng/) still applies.
 
 > [!TIP]
-> Ligolo-ng 0.8 added a lot of new features, including:
+> Upstream Ligolo-ng 0.8 added a lot of new features, including:
 > - 🌐 API and a beautiful Web Interface thanks to [L'ami du Raisin](https://github.com/jeremiebedjai), allowing **multiplayer**!
 > - ⚙️ Simple configuration file, to keep your tunneling/proxy settings
-> - 🚦 **Daemon mode**, to run Ligolo-ng as a service
+> - 🚦 **Daemon mode**, to run upstream Ligolo-ng as a service
 > - 🔗 Auto-bind, to **automatically configure tunneling** whenever a specific agent connects
 > - 📶 Easy and automatic (autoroute) route and interface management on **Windows, Linux, MacOS and BSD**!
 > - 💀 Agent kill, to remotely terminate an agent
 >
 > Please try it out! 
-> [Release: Ligolo-ng 0.8](https://github.com/nicocha30/ligolo-ng/releases/tag/v0.8)
+> [Release: upstream Ligolo-ng 0.8](https://github.com/nicocha30/ligolo-ng/releases/tag/v0.8)
 > 
 > ![Ligolo Web](doc/webui.png)
 
@@ -46,8 +54,8 @@ An advanced, yet simple, tunneling tool that uses TUN interfaces.
 
 ## Introduction
 
-**Ligolo-ng** is a *simple*, *lightweight* and *fast* tool that allows pentesters to establish
-tunnels from a reverse TCP/TLS connection using a **tun interface** (without the need of SOCKS).
+**Ligolo-ng Relay** keeps upstream Ligolo-ng's simple, lightweight TUN-based tunneling
+model and adds recursive relay chains for multi-pivot operator workflows.
 
 ## Features
 
@@ -63,6 +71,47 @@ tunnels from a reverse TCP/TLS connection using a **tun interface** (without the
 - Reverse/Bind Connection
 - Automatic tunnel/listeners recovery (in case of network issues)
 - Websocket support
+- **Multi-hop agent chaining (relay mode)** for pivoting through segmented networks (see [ENHANCEMENTS.md](ENHANCEMENTS.md))
+- **Relay operations dashboard and `relayctl ops`** for chain health, route
+  conflicts, token state, and automation gates
+- **Smart relay automation** for route planning, safe repair actions, parent
+  failover, and opt-in bounded auto-heal reconciliation
+- **MCP server (`relaymcp`)** exposing the relay control plane to AI agents such
+  as Claude over stdio or streamable HTTP (see [doc/MCP.md](doc/MCP.md))
+- **ICMP Port Unreachable** responses for fast UDP port scanning
+
+## Fork verification
+
+- `make relay-test` runs a Docker lab with a proxy, a direct relay agent, a
+  nested relay agent, and a downstream agent connected through the relay chain,
+  including auto-heal failover preview and apply.
+- [doc/QUICKSTART_RELAY.md](doc/QUICKSTART_RELAY.md) gives the copy-paste
+  operator path for `Proxy -> Agent A relay -> Agent B`, including `relayctl
+  doctor`, token rotation, and revocation.
+- [doc/RELAY_API.md](doc/RELAY_API.md) documents scriptable relay control and
+  structured chain status, including the `relayctl` helper.
+- [doc/MCP.md](doc/MCP.md) documents the `relaymcp` MCP server that lets an AI
+  agent (e.g. Claude) drive the same relay control plane through MCP tools.
+- `chain_routes`, `chain_plan`, `chain_repair`, `chain_failover`,
+  `chain_autoroute`, `relayctl chain-plan`, `relayctl chain-repair`,
+  `relayctl chain-failover`, `relayctl autoheal`, and
+  `relayctl ops --fail-on-warning` help preview, repair, re-parent, reconcile,
+  apply, and gate per-agent routes across direct and relayed sessions.
+- The Web UI **Relay** page exposes the same relay operations report with
+  topology, mesh health, smart route-plan decisions, repair and failover
+  recommendations, suggested actions, auto-heal status, relay start, and token
+  controls.
+- [doc/DEPLOYMENT.md](doc/DEPLOYMENT.md) covers Docker Compose, systemd, and
+  Helm deployment patterns for production hosts.
+- [doc/UDP_SCAN_BENCHMARK.md](doc/UDP_SCAN_BENCHMARK.md) describes how to measure
+  UDP scan speed and classification accuracy.
+- [doc/RESTRICTIVE_EGRESS.md](doc/RESTRICTIVE_EGRESS.md) covers WebSocket, HTTP
+  proxy, SOCKS, and relay-chain usage in constrained networks.
+- [doc/PERFORMANCE.md](doc/PERFORMANCE.md) gives repeatable path RTT and
+  throughput checks for relay chains.
+- [doc/RELEASE.md](doc/RELEASE.md) documents release gates and artifact signing.
+- `build/verify-release.sh` verifies release archives, checksum Sigstore
+  bundles, and GHCR image signatures for a downloaded release.
 
 ## Demo
 
@@ -70,7 +119,9 @@ tunnels from a reverse TCP/TLS connection using a **tun interface** (without the
 
 ## How is this different from Ligolo/Chisel/Meterpreter... ?
 
-Instead of using a SOCKS proxy or TCP/UDP forwarders, **Ligolo-ng** creates a userland network stack using [Gvisor](https://gvisor.dev/).
+Like upstream Ligolo-ng, **Ligolo-ng Relay** creates a userland network stack
+using [Gvisor](https://gvisor.dev/) instead of requiring SOCKS proxychains or
+manual TCP/UDP forwarders.
 
 When running the *relay/proxy* server, a **tun** interface is used, packets sent to this interface are
 translated, and then transmitted to the *agent* remote network.
@@ -86,7 +137,33 @@ This allows running tools like *nmap* without the use of *proxychains* (simpler 
 
 ## How to use - documentation - tutorial
 
-You will find the documentation for Ligolo-ng, as well as the steps to follow to get it up and running on the [Ligolo-ng Documentation](https://docs.ligolo.ng/)
+Core setup and usage are inherited from upstream Ligolo-ng and remain documented in the
+[upstream Ligolo-ng Documentation](https://docs.ligolo.ng/). Fork-specific relay-chain
+usage lives in [ENHANCEMENTS.md](ENHANCEMENTS.md),
+[doc/QUICKSTART_RELAY.md](doc/QUICKSTART_RELAY.md),
+[doc/RELAY_API.md](doc/RELAY_API.md), and [doc/MCP.md](doc/MCP.md).
+
+## AI agent control (MCP)
+
+Ligolo-ng Relay can be driven by an AI agent (such as Claude) through the
+[Model Context Protocol](https://modelcontextprotocol.io). Run it as the standalone
+`relaymcp` bridge against the API, or embed it directly in the proxy:
+
+```shell
+# standalone bridge (talks to the proxy REST API)
+LIGOLO_API=http://127.0.0.1:8080 LIGOLO_USER=relay LIGOLO_PASSWORD=… relaymcp
+
+# embedded in the proxy, over stdio (no API server needed)
+proxy -mcp -selfcert -laddr 0.0.0.0:11601
+
+# embedded, over streamable HTTP at /mcp (behind the API's JWT auth)
+proxy -api -mcp-api -web-user relay -web-password …
+```
+
+Tools cover agents, relay chains, diagnostics, route planning, repair, parent
+failover, auto-heal, tunnels, listeners, interfaces, and routes, with MCP destructive
+hints so the client confirms disruptive actions (or run read-only). See
+[doc/MCP.md](doc/MCP.md) for the tool catalog and client configuration.
 
 ## Does it require Administrator/root access ?
 
@@ -98,7 +175,7 @@ However, on your *relay/proxy* server, you need to be able to create a *tun* int
 
 * TCP
 * UDP
-* ICMP (echo requests)
+* ICMP (echo requests, and Port Unreachable errors for UDP scan acceleration)
 
 ## Performance
 
@@ -133,11 +210,16 @@ When using *nmap*, you should use `--unprivileged` or `-PE` to avoid false posit
 
 ## Todo
 
-- Implement other ICMP error messages (this will speed up UDP scans) ;
+- ~~Implement other ICMP error messages (this will speed up UDP scans)~~ (done — ICMP Port Unreachable) ;
+- ~~Multi-hop agent chaining~~ (done — relay mode) ;
 - Do not *RST* when receiving an *ACK* from an invalid TCP connection (nmap will report the host as up) ;
 - Add mTLS support.
 
 ## Credits
+
+Ligolo-ng Relay is a maintained fork of
+[upstream Ligolo-ng](https://github.com/nicocha30/ligolo-ng) by Nicolas Chatelain. All
+credit for the original tool goes to the upstream authors:
 
 - Nicolas Chatelain <nicolas -at- chatelain.me>
 - Jeremie Bedjai (Ligolo-ng-Web)

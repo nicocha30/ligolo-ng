@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -44,6 +44,13 @@ const (
 	MessageListenerCloseResponse
 	MessageAgentKillRequest
 	MessageListenerSocketConnectionReady
+	MessageRelayRequest
+	MessageRelayResponse
+	MessageRelayNewConnection
+	MessageRelayBridgeRequest
+	MessageRelayEvent
+	MessageAgentReconnectRequest
+	MessageAgentReconnectResponse
 )
 
 const (
@@ -62,9 +69,10 @@ type InfoRequestPacket struct {
 
 // InfoReplyPacket contains the Name of the agent and the network interfaces configuration
 type InfoReplyPacket struct {
-	Name       string
-	Interfaces []NetInterface
-	SessionID  string
+	Name         string
+	Interfaces   []NetInterface
+	SessionID    string
+	RelayCapable bool
 }
 
 // ListenerSockRequestPacket is used by the proxy when relaying a listener socket
@@ -202,3 +210,51 @@ type HostPingResponsePacket struct {
 
 // AgentKillRequestPacket is sent by the proxy to terminate an agent
 type AgentKillRequestPacket struct{}
+
+// AgentReconnectRequestPacket is sent by the proxy to update an agent's
+// reconnect target before the current session is closed.
+type AgentReconnectRequestPacket struct {
+	ConnectAddr       string
+	AcceptFingerprint string
+	RelayToken        string
+}
+
+// AgentReconnectResponsePacket is the response to AgentReconnectRequestPacket.
+type AgentReconnectResponsePacket struct {
+	Err       bool
+	ErrString string
+}
+
+// RelayRequestPacket is sent by the proxy to instruct an agent to start a relay listener
+type RelayRequestPacket struct {
+	ListenAddr             string
+	AuthTokenHash          string
+	AuthTokenExpiresAtUnix int64
+	OneTimeToken           bool
+}
+
+// RelayResponsePacket is the response to RelayRequestPacket
+type RelayResponsePacket struct {
+	Err             bool
+	ErrString       string
+	CertFingerprint string
+}
+
+// RelayNewConnectionPacket is sent by the agent on the relay control stream when a downstream agent connects
+type RelayNewConnectionPacket struct {
+	ConnectionID int32
+	RemoteAddr   string
+}
+
+// RelayBridgeRequestPacket is sent by the proxy to the agent to bridge a yamux stream to a pending downstream connection
+type RelayBridgeRequestPacket struct {
+	ConnectionID int32
+}
+
+// RelayEventPacket is sent by a relay agent to report relay lifecycle and auth events.
+type RelayEventPacket struct {
+	Kind       string
+	RemoteAddr string
+	Message    string
+	AtUnix     int64
+}

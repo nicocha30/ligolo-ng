@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -24,6 +24,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 	"net"
 	"net/http"
+	"time"
 )
 
 type CertManagerConfig struct {
@@ -57,11 +58,23 @@ func CertManager(c *CertManagerConfig) (*tls.Config, error) {
 			if err != nil {
 				return nil, errors.New("Port 80 is not available, please make sure it's accessible for Let's Encrypt ACME challenge")
 			}
-			lis.Close()
+			if err := lis.Close(); err != nil {
+				return nil, fmt.Errorf("could not close ACME availability probe listener: %w", err)
+			}
 
 			go func() {
 				h := certManager.HTTPHandler(nil)
-				http.ListenAndServe(":http", h)
+				server := &http.Server{
+					Addr:              ":http",
+					Handler:           h,
+					ReadHeaderTimeout: 5 * time.Second,
+					ReadTimeout:       30 * time.Second,
+					WriteTimeout:      60 * time.Second,
+					IdleTimeout:       120 * time.Second,
+				}
+				if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					logrus.Errorf("ACME HTTP challenge server stopped: %v", err)
+				}
 			}()
 			acmeHandlerStarted = true
 		}

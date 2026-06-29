@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -18,8 +18,8 @@ package config
 
 import (
 	"fmt"
+	"github.com/allsmog/ligolo-ng-relay/pkg/proxy/netinfo"
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo"
 	"slices"
 	"strings"
 )
@@ -79,9 +79,9 @@ func (i *InterfaceInfo) GetRouteString() string {
 	var stringBuffer []string
 	for _, route := range i.Routes {
 		if route.Active {
-			stringBuffer = append(stringBuffer, text.Colors{text.FgGreen}.Sprintf(route.Destination))
+			stringBuffer = append(stringBuffer, text.Colors{text.FgGreen}.Sprintf("%s", route.Destination))
 		} else {
-			stringBuffer = append(stringBuffer, text.Colors{text.FgYellow}.Sprintf(route.Destination))
+			stringBuffer = append(stringBuffer, text.Colors{text.FgYellow}.Sprintf("%s", route.Destination))
 		}
 	}
 	return strings.Join(stringBuffer, ",")
@@ -159,6 +159,25 @@ func AddRouteConfig(ifName string, routeCidr string) error {
 	return nil
 }
 
+func EnsureRouteConfig(ifName string, routeCidr string) error {
+	var ifaceInfo map[string]InterfaceConfig
+	Config.UnmarshalKey("interface", &ifaceInfo)
+	if _, ok := ifaceInfo[ifName]; !ok {
+		return fmt.Errorf("interface %s not found", ifName)
+	}
+	if slices.Contains(ifaceInfo[ifName].Routes, routeCidr) {
+		return nil
+	}
+	ifaceInfo[ifName] = InterfaceConfig{
+		Routes: append(ifaceInfo[ifName].Routes, routeCidr),
+	}
+	Config.Set("interface", ifaceInfo)
+	if err := Config.WriteConfig(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func DeleteRouteConfig(ifName string, routeCidr string) error {
 	var ifaceInfo map[string]InterfaceConfig
 	// Unmarshal current interfaces config
@@ -196,6 +215,25 @@ func AddInterfaceConfig(ifName string) error {
 		Routes: nil,
 	}
 	// Update the config
+	Config.Set("interface", ifaceInfo)
+	if err := Config.WriteConfig(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func EnsureInterfaceConfig(ifName string) error {
+	var ifaceInfo map[string]InterfaceConfig
+	Config.UnmarshalKey("interface", &ifaceInfo)
+	if ifaceInfo == nil {
+		ifaceInfo = make(map[string]InterfaceConfig)
+	}
+	if _, ok := ifaceInfo[ifName]; ok {
+		return nil
+	}
+	ifaceInfo[ifName] = InterfaceConfig{
+		Routes: nil,
+	}
 	Config.Set("interface", ifaceInfo)
 	if err := Config.WriteConfig(); err != nil {
 		return err

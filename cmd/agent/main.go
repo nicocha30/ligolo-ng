@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -17,11 +17,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -29,14 +28,16 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 
-	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
-	"github.com/nicocha30/ligolo-ng/pkg/utils"
+	"github.com/allsmog/ligolo-ng-relay/pkg/tlsutils"
+	"github.com/allsmog/ligolo-ng-relay/pkg/utils"
 
+	"github.com/allsmog/ligolo-ng-relay/pkg/agent"
+	"github.com/allsmog/ligolo-ng-relay/pkg/protocol"
 	"github.com/coder/websocket"
 	"github.com/hashicorp/yamux"
-	"github.com/nicocha30/ligolo-ng/pkg/agent"
 	"github.com/sirupsen/logrus"
 	goproxy "golang.org/x/net/proxy"
 )
@@ -47,8 +48,13 @@ var (
 	date    = "unknown"
 )
 
+type connectionTarget struct {
+	connectAddr       string
+	acceptFingerprint string
+	relayToken        string
+}
+
 func main() {
-	var tlsConfig tls.Config
 	var ignoreCertificate = flag.Bool("ignore-cert", false, "ignore TLS certificate validation (dangerous), only for debug purposes")
 	var acceptFingerprint = flag.String("accept-fingerprint", "", "accept certificates matching the following SHA256 fingerprint (hex format)")
 	var verbose = flag.Bool("v", false, "enable verbose mode")
@@ -59,14 +65,15 @@ func main() {
 	var reconnectTimeout = flag.Int("reconnect-timeout", 300, "total reconnection timeout in seconds (default: 300 = 5 minutes)")
 	var socksProxy = flag.String("proxy", "", "proxy URL address (http://admin:secret@127.0.0.1:8080) or socks://admin:secret@127.0.0.1:8080")
 	var serverAddr = flag.String("connect", "", "connect to proxy (domain:port)")
+	var relayToken = flag.String("relay-token", os.Getenv("LIGOLO_RELAY_TOKEN"), "relay authentication token (or LIGOLO_RELAY_TOKEN)")
 	var bindAddr = flag.String("bind", "", "bind to ip:port")
 	var userAgent = flag.String("ua", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36", "HTTP User-Agent")
 	var versionFlag = flag.Bool("version", false, "show the current version")
 
 	flag.Usage = func() {
-		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
-		fmt.Println("Made in France with love by @Nicocha30!")
-		fmt.Println("https://github.com/nicocha30/ligolo-ng")
+		fmt.Printf("Ligolo-ng Relay %s / %s / %s\n", version, commit, date)
+		fmt.Println("Maintained fork of upstream Ligolo-ng by @Nicocha30")
+		fmt.Println("https://github.com/allsmog/ligolo-ng-relay")
 		fmt.Printf("\nUsage of %s:\n", os.Args[0])
 		flag.PrintDefaults()
 	}
@@ -74,7 +81,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
+		fmt.Printf("Ligolo-ng Relay %s / %s / %s\n", version, commit, date)
 		return
 	}
 
@@ -85,6 +92,7 @@ func main() {
 	}
 
 	if *bindAddr != "" {
+		var tlsConfig tls.Config
 		bind(&tlsConfig, *bindAddr)
 	}
 
@@ -92,16 +100,12 @@ func main() {
 		logrus.Fatal("please, specify the target host user -connect host:port")
 	}
 
-	ligoloUrl, err := utils.ParseLigoloURL(*serverAddr)
-	if err != nil {
+	if _, err := utils.ParseLigoloURL(*serverAddr); err != nil {
 		logrus.Fatalf("Invalid connect address, please use http(s)://host:port for websocket or host:port for tcp")
 	}
 
-	tlsConfig.ServerName = ligoloUrl.Hostname()
-
 	if *ignoreCertificate {
 		logrus.Warn("warning, certificate validation disabled")
-		tlsConfig.InsecureSkipVerify = true
 	}
 
 	// Validate retry and reconnect delays
@@ -119,14 +123,52 @@ func main() {
 	connectionEstablished := false
 	var reconnectStartTime time.Time
 	var reconnectAttempt int
+	targetMu := sync.RWMutex{}
+	target := connectionTarget{
+		connectAddr:       *serverAddr,
+		acceptFingerprint: *acceptFingerprint,
+		relayToken:        *relayToken,
+	}
+
+	agent.SetReconnectRequestHandler(func(request protocol.AgentReconnectRequestPacket) error {
+		if request.ConnectAddr == "" {
+			return fmt.Errorf("reconnect target is empty")
+		}
+		if _, err := utils.ParseLigoloURL(request.ConnectAddr); err != nil {
+			return fmt.Errorf("invalid reconnect target: %v", err)
+		}
+		targetMu.Lock()
+		target = connectionTarget{
+			connectAddr:       request.ConnectAddr,
+			acceptFingerprint: request.AcceptFingerprint,
+			relayToken:        request.RelayToken,
+		}
+		targetMu.Unlock()
+		logrus.WithField("connect", request.ConnectAddr).Info("Reconnect target updated by proxy")
+		return nil
+	})
 
 	for {
 		var err error
 		var connSuccess bool
+		targetMu.RLock()
+		currentTarget := target
+		targetMu.RUnlock()
+
+		ligoloUrl, err := utils.ParseLigoloURL(currentTarget.connectAddr)
+		if err != nil {
+			logrus.Fatalf("Invalid connect address, please use http(s)://host:port for websocket or host:port for tcp")
+		}
+		tlsConfig := tls.Config{
+			ServerName: ligoloUrl.Hostname(),
+		}
+		if *ignoreCertificate {
+			tlsConfig.InsecureSkipVerify = true
+		}
 
 		if ligoloUrl.IsWebsocket() {
 			//websocket
-			connSuccess, err = wsconnect(&tlsConfig, *serverAddr, *socksProxy, *userAgent)
+			connSuccess, err = wsconnect(&tlsConfig, currentTarget.connectAddr, *socksProxy, *userAgent)
 		} else {
 			if *socksProxy != "" {
 				//suppose that scheme is socks:// or socks5://
@@ -140,30 +182,46 @@ func main() {
 				}
 				if proxyUrl.Scheme == "socks" || proxyUrl.Scheme == "socks5" {
 					pass, _ := proxyUrl.User.Password()
-					conn, err = sockDial(*serverAddr, proxyUrl.Host, proxyUrl.User.Username(), pass)
+					conn, err = sockDial(currentTarget.connectAddr, proxyUrl.Host, proxyUrl.User.Username(), pass)
 				} else {
 					logrus.Fatal("invalid socks5 address, please use socks://host:port")
 				}
 			} else {
-				conn, err = net.Dial("tcp", *serverAddr)
+				conn, err = net.Dial("tcp", currentTarget.connectAddr)
 			}
 			if err == nil {
-				if *acceptFingerprint != "" {
-					tlsConfig.InsecureSkipVerify = true
-					tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-						crtFingerprint := sha256.Sum256(rawCerts[0])
-						crtMatch, decodeErr := hex.DecodeString(*acceptFingerprint)
-						if decodeErr != nil {
-							return fmt.Errorf("invalid cert fingerprint: %v\n", decodeErr)
+				if currentTarget.acceptFingerprint != "" {
+					crtMatch, decodeErr := hex.DecodeString(currentTarget.acceptFingerprint)
+					if decodeErr != nil {
+						conn.Close()
+						err = fmt.Errorf("invalid cert fingerprint: %v", decodeErr)
+					} else {
+						tlsConfig.InsecureSkipVerify = true
+						tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
+							if len(state.PeerCertificates) == 0 {
+								return fmt.Errorf("server did not present a certificate")
+							}
+							crtFingerprint := sha256.Sum256(state.PeerCertificates[0].Raw)
+							if subtle.ConstantTimeCompare(crtMatch, crtFingerprint[:]) != 1 {
+								return fmt.Errorf("certificate does not match fingerprint: %X != %X", crtFingerprint, crtMatch)
+							}
+							return nil
 						}
-						if bytes.Compare(crtMatch, crtFingerprint[:]) != 0 {
-							return fmt.Errorf("certificate does not match fingerprint: %X != %X", crtFingerprint, crtMatch)
-						}
-						return nil
 					}
 				}
-				tlsConn := tls.Client(conn, &tlsConfig)
-				connSuccess, err = connect(tlsConn)
+				if err == nil {
+					tlsConn := tls.Client(conn, &tlsConfig)
+					if currentTarget.relayToken != "" {
+						if authErr := agent.WriteRelayAuth(tlsConn, currentTarget.relayToken); authErr != nil {
+							conn.Close()
+							err = fmt.Errorf("relay auth failed: %v", authErr)
+						} else {
+							connSuccess, err = connect(tlsConn)
+						}
+					} else {
+						connSuccess, err = connect(tlsConn)
+					}
+				}
 			}
 		}
 
@@ -247,6 +305,7 @@ func connect(conn net.Conn) (bool, error) {
 	for {
 		conn, err := yamuxConn.Accept()
 		if err != nil {
+			agent.CloseListeners()
 			return true, err // Connection was established but now lost
 		}
 		go agent.HandleConn(conn)

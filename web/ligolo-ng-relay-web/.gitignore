@@ -1,0 +1,5 @@
+dist
+.idea
+node_modules
+.eslintcache
+.env

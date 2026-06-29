@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.4'
+      - name: Go vet
+        run: go vet ./...
+      - name: Go test
+        run: go test ./...
+      - name: Go race test
+        run: go test -race ./...
+      - name: Build commands
+        run: go build ./cmd/proxy ./cmd/agent ./cmd/relayctl ./cmd/relaymcp
+      - name: Govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: Gosec TLS pinning check
+        run: go run github.com/securego/gosec/v2/cmd/gosec@latest -quiet -include=G123 -tests ./...
+
+  web-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/ligolo-ng-relay-web/package-lock.json
+      - name: Install Web UI dependencies
+        run: npm ci
+        working-directory: web/ligolo-ng-relay-web
+      - name: Build Web UI
+        run: npm run build
+        working-directory: web/ligolo-ng-relay-web
+      - name: Audit Web UI dependencies
+        run: npm audit --audit-level=moderate
+        working-directory: web/ligolo-ng-relay-web
+
+  release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.4'
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+      - name: GoReleaser check
+        run: go run github.com/goreleaser/goreleaser/v2@v2.16.0 check --config .goreleaser.yaml
+      - name: Helm template check
+        run: helm template ligolo deploy/helm/ligolo-ng-relay --set proxy.webPassword=ci-password >/dev/null
+
+  relay-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Run relay integration lab
+        run: make relay-test

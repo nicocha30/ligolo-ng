@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -20,6 +20,8 @@ import (
 	"io"
 	"net"
 
+	"github.com/allsmog/ligolo-ng-relay/pkg/protocol"
+	"github.com/allsmog/ligolo-ng-relay/pkg/relay"
 	"github.com/hashicorp/yamux"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/adapters/gonet"
@@ -29,8 +31,6 @@ import (
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/tcp"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/udp"
 	"github.com/nicocha30/gvisor-ligolo/pkg/waiter"
-	"github.com/nicocha30/ligolo-ng/pkg/protocol"
-	"github.com/nicocha30/ligolo-ng/pkg/relay"
 	"github.com/sirupsen/logrus"
 )
 
@@ -177,6 +177,10 @@ func HandlePacket(nstack *stack.Stack, localConn TunConn, yamuxConn *yamux.Sessi
 			}
 
 		}()
+	} else if localConn.IsUDP() && reply.Reset {
+		// Agent got ECONNREFUSED on UDP — send ICMP Port Unreachable back
+		// so scanners like nmap can detect closed ports instantly.
+		SendICMPPortUnreachable(nstack, localConn.GetUDP().EndpointID)
 	} else {
 		// Connection not established: terminate local conn and close request stream.
 		localConn.Terminate(reply.Reset)

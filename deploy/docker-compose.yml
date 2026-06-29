@@ -1,0 +1,57 @@
+services:
+  proxy:
+    image: ghcr.io/allsmog/ligolo-ng-relay-proxy:${LIGOLO_VERSION:-0.8.3-relay.5}
+    restart: unless-stopped
+    user: "0:0"
+    working_dir: /etc/ligolo-ng-relay-proxy
+    command:
+      - -daemon
+      - -selfcert
+      - -api
+      - -api-laddr
+      - 0.0.0.0:8080
+      - -web-user
+      - ${LIGOLO_WEB_USER:-ligolo}
+      - -web-password
+      - ${LIGOLO_WEB_PASSWORD:?set LIGOLO_WEB_PASSWORD}
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "${LIGOLO_PROXY_PORT:-11601}:11601"
+      - "127.0.0.1:${LIGOLO_API_PORT:-8080}:8080"
+      - "${LIGOLO_RELAY_PORT:-11602}:11602"
+    volumes:
+      - proxy-config:/etc/ligolo-ng-relay-proxy
+
+  relayctl:
+    image: ghcr.io/allsmog/ligolo-ng-relayctl:${LIGOLO_VERSION:-0.8.3-relay.5}
+    profiles:
+      - tools
+    depends_on:
+      - proxy
+    command:
+      - -api
+      - http://proxy:8080
+      - -user
+      - ${LIGOLO_WEB_USER:-ligolo}
+      - -password
+      - ${LIGOLO_WEB_PASSWORD:?set LIGOLO_WEB_PASSWORD}
+      - ops
+
+  agent-example:
+    image: ghcr.io/allsmog/ligolo-ng-relay-agent:${LIGOLO_VERSION:-0.8.3-relay.5}
+    profiles:
+      - agent-example
+    depends_on:
+      - proxy
+    command:
+      - -connect
+      - proxy:11601
+      - -ignore-cert
+      - -retry
+      - -reconnect
+
+volumes:
+  proxy-config:

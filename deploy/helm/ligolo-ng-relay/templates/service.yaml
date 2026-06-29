@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ligolo-ng-relay.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "ligolo-ng-relay.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ include "ligolo-ng-relay.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: proxy
+      port: {{ .Values.service.ports.proxy }}
+      targetPort: proxy
+    - name: api
+      port: {{ .Values.service.ports.api }}
+      targetPort: api
+    - name: relay
+      port: {{ .Values.service.ports.relay }}
+      targetPort: relay

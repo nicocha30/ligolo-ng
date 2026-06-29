@@ -1,0 +1,40 @@
+image:
+  repository: ghcr.io/allsmog/ligolo-ng-relay-proxy
+  tag: 0.8.3-relay.5
+  pullPolicy: IfNotPresent
+
+proxy:
+  listen: 0.0.0.0:11601
+  apiListen: 0.0.0.0:8080
+  selfcert: true
+  webUser: ligolo
+  webPassword: ""
+  existingSecret: ""
+
+service:
+  type: ClusterIP
+  ports:
+    proxy: 11601
+    api: 8080
+    relay: 11602
+
+securityContext:
+  privileged: false
+  capabilities:
+    add:
+      - NET_ADMIN
+
+tunDevice:
+  enabled: true
+  hostPath: /dev/net/tun
+
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

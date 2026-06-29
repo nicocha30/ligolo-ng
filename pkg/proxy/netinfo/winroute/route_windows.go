@@ -207,7 +207,7 @@ func (wc *windowsClient) Table() ([]Handle, error) {
 			return nil, fmt.Errorf("failed to get destination address: %w", err)
 		}
 
-		// Ligolo-ng: parse correct prefix len
+		// Ligolo-ng Relay: parse correct prefix len
 		destIPAddr, err := ParseIP(fmt.Sprintf("%s/%d", destAddr.String(), route.DestinationPrefix.PrefixLength))
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse destination address: %w", err)

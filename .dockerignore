@@ -1,0 +1,10 @@
+.git
+.idea
+dist
+ligolo-selfcerts
+ligolo-ng-relay.history
+ligolo-ng-relay.yaml
+web/dist/assets
+web/dist/ligolo.svg
+web/ligolo-ng-relay-web/dist
+web/ligolo-ng-relay-web/node_modules

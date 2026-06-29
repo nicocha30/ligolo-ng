@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -18,8 +18,8 @@ package web
 
 import "embed"
 
-//go:generate npm install -C ligolo-ng-web
-//go:generate npm run build-ligolo -C ligolo-ng-web
+//go:generate npm ci -C ligolo-ng-relay-web
+//go:generate npm run build-ligolo -C ligolo-ng-relay-web
 
 //go:embed dist
 var LigoloWebFS embed.FS

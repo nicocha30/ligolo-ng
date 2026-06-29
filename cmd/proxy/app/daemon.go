@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -17,57 +17,134 @@
 package app
 
 import (
+	"errors"
 	"fmt"
-	"github.com/gin-contrib/cors"
-	"github.com/gin-contrib/static"
-	"github.com/gin-gonic/gin"
-	"github.com/nicocha30/ligolo-ng/cmd/proxy/config"
-	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo"
-	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
-	"github.com/nicocha30/ligolo-ng/web"
-	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/allsmog/ligolo-ng-relay/cmd/proxy/config"
+	"github.com/allsmog/ligolo-ng-relay/pkg/proxy/netinfo"
+	"github.com/allsmog/ligolo-ng-relay/pkg/tlsutils"
+	"github.com/allsmog/ligolo-ng-relay/web"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-contrib/static"
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/sirupsen/logrus"
 )
-import "github.com/golang-jwt/jwt/v5"
+
+const (
+	apiTokenTTL        = time.Hour
+	loginFailureLimit  = 5
+	loginFailureWindow = 5 * time.Minute
+)
 
 var (
 	internalServerError = gin.H{"error": "internal server error"}
 	inputError          = gin.H{"error": "input error"}
+	apiLoginLimiter     = newLoginRateLimiter(loginFailureLimit, loginFailureWindow)
 )
+
+type loginRateLimiter struct {
+	mu       sync.Mutex
+	limit    int
+	window   time.Duration
+	failures map[string]loginFailure
+}
+
+type loginFailure struct {
+	count int
+	first time.Time
+}
+
+func newLoginRateLimiter(limit int, window time.Duration) *loginRateLimiter {
+	return &loginRateLimiter{
+		limit:    limit,
+		window:   window,
+		failures: make(map[string]loginFailure),
+	}
+}
+
+func (l *loginRateLimiter) TooManyFailures(key string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	failure, ok := l.failures[key]
+	if !ok || now.Sub(failure.first) > l.window {
+		delete(l.failures, key)
+		return false
+	}
+	return failure.count >= l.limit
+}
+
+func (l *loginRateLimiter) RecordFailure(key string, now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	failure, ok := l.failures[key]
+	if !ok || now.Sub(failure.first) > l.window {
+		l.failures[key] = loginFailure{count: 1, first: now}
+		return
+	}
+	failure.count++
+	l.failures[key] = failure
+}
+
+func (l *loginRateLimiter) Reset(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.failures, key)
+}
+
+func authorizationToken(header string) string {
+	header = strings.TrimSpace(header)
+	if len(header) >= len("Bearer ") && strings.EqualFold(header[:len("Bearer ")], "Bearer ") {
+		return strings.TrimSpace(header[len("Bearer "):])
+	}
+	return header
+}
+
+func jwtSecret() []byte {
+	return []byte(config.Config.GetString("web.secret"))
+}
 
 func authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenString := c.GetHeader("Authorization")
-
-		// Parse the token
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, http.ErrAbortHandler
-			}
-			return []byte(config.Config.GetString("web.secret")), nil
-		})
-
-		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-			c.Abort() // Stop further processing if unauthorized
-			return
-		}
-
-		// Set the token claims to the context
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			c.Set("claims", claims)
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		tokenString := authorizationToken(c.GetHeader("Authorization"))
+		if tokenString == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			c.Abort()
 			return
 		}
 
-		c.Next() // Proceed to the next handler if authorized
+		parser := jwt.NewParser(
+			jwt.WithExpirationRequired(),
+			jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		)
+		token, err := parser.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			return jwtSecret(), nil
+		})
+
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			c.Abort()
+			return
+		}
+
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+			c.Set("claims", claims)
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			c.Abort()
+			return
+		}
+
+		c.Next()
 	}
 }
 
@@ -86,7 +163,7 @@ func StartLigoloApi() {
 	} else {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	logrus.Warn("Ligolo-ng API is experimental, and should be running behind a reverse-proxy if publicly exposed.")
+	logrus.Warn("Ligolo-ng Relay API is enabled; keep it private or behind an authenticated reverse proxy.")
 
 	if config.Config.GetString("web.logfile") != "" {
 		f, err := os.Create(config.Config.GetString("web.logfile"))
@@ -132,18 +209,29 @@ func StartLigoloApi() {
 		}
 		var authInfo AuthInfo
 		if err := c.ShouldBindJSON(&authInfo); err != nil {
-			c.JSON(http.StatusInternalServerError, inputError)
+			c.JSON(http.StatusBadRequest, inputError)
+			return
+		}
+		clientKey := c.ClientIP()
+		now := time.Now()
+		if apiLoginLimiter.TooManyFailures(clientKey, now) {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many failed login attempts"})
 			return
 		}
 		if !config.CheckAuth(authInfo.Username, authInfo.Password) {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid credentials"})
+			apiLoginLimiter.RecordFailure(clientKey, now)
+			c.Header("WWW-Authenticate", "Bearer")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
+		apiLoginLimiter.Reset(clientKey)
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 			"username": authInfo.Username,
-			"exp":      time.Now().Add(time.Hour * 1).Unix(),
+			"role":     "admin",
+			"iat":      now.Unix(),
+			"exp":      now.Add(apiTokenTTL).Unix(),
 		})
-		signedJwt, err := token.SignedString([]byte(config.Config.GetString("web.secret")))
+		signedJwt, err := token.SignedString(jwtSecret())
 		if err != nil {
 			c.Error(err)
 			c.JSON(http.StatusInternalServerError, internalServerError)
@@ -413,6 +501,303 @@ func StartLigoloApi() {
 			c.JSON(http.StatusOK, gin.H{"message": "tunnel stopping"})
 		})
 
+		apiv1.POST("/relay/:id", func(c *gin.Context) {
+			type RelayRequest struct {
+				ListenAddr      string
+				AuthToken       string
+				TokenTTLSeconds int64
+				OneTimeToken    bool
+			}
+			var relayReq RelayRequest
+			agentParam := c.Param("id")
+			agentId, err := strconv.Atoi(agentParam)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			if err := c.ShouldBindJSON(&relayReq); err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			AgentListMutex.Lock()
+			agent, ok := AgentList[agentId]
+			AgentListMutex.Unlock()
+			if !ok {
+				c.JSON(http.StatusNotFound, gin.H{"error": "invalid agent"})
+				return
+			}
+			if !agent.RelayCapable {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "agent does not support relay mode"})
+				return
+			}
+			result, err := startRelayOnAgent(agent, relayReq.ListenAddr, relayReq.AuthToken, relayTokenTTLFromSeconds(relayReq.TokenTTLSeconds), relayReq.OneTimeToken)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"message":          "relay started",
+				"fingerprint":      result.CertFingerprint,
+				"auth_token":       result.AuthToken,
+				"token_expires_at": result.TokenExpiresAt,
+				"one_time_token":   result.OneTimeToken,
+				"connect_command":  relayConnectCommand(relayReq.ListenAddr, result.CertFingerprint, result.AuthToken),
+			})
+		})
+
+		apiv1.POST("/relay/:id/token", func(c *gin.Context) {
+			type RelayTokenRequest struct {
+				AuthToken       string
+				TokenTTLSeconds int64
+				OneTimeToken    bool
+			}
+			var req RelayTokenRequest
+			agentParam := c.Param("id")
+			agentId, err := strconv.Atoi(agentParam)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			AgentListMutex.Lock()
+			agent, ok := AgentList[agentId]
+			AgentListMutex.Unlock()
+			if !ok {
+				c.JSON(http.StatusNotFound, gin.H{"error": "invalid agent"})
+				return
+			}
+			result, err := rotateRelayToken(agent, req.AuthToken, relayTokenTTLFromSeconds(req.TokenTTLSeconds), req.OneTimeToken)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"message":          "relay token rotated",
+				"fingerprint":      result.CertFingerprint,
+				"auth_token":       result.AuthToken,
+				"token_expires_at": result.TokenExpiresAt,
+				"one_time_token":   result.OneTimeToken,
+				"connect_command":  relayConnectCommand(agent.RelayListenAddr, result.CertFingerprint, result.AuthToken),
+			})
+		})
+
+		apiv1.DELETE("/relay/:id/token", func(c *gin.Context) {
+			agentParam := c.Param("id")
+			agentId, err := strconv.Atoi(agentParam)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			AgentListMutex.Lock()
+			agent, ok := AgentList[agentId]
+			AgentListMutex.Unlock()
+			if !ok {
+				c.JSON(http.StatusNotFound, gin.H{"error": "invalid agent"})
+				return
+			}
+			if err := stopRelayWithDownstream(agent); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"message": "relay token revoked and relay stopped"})
+		})
+
+		apiv1.DELETE("/relay/:id", func(c *gin.Context) {
+			agentParam := c.Param("id")
+			agentId, err := strconv.Atoi(agentParam)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			AgentListMutex.Lock()
+			agent, ok := AgentList[agentId]
+			AgentListMutex.Unlock()
+			if !ok {
+				c.JSON(http.StatusNotFound, gin.H{"error": "invalid agent"})
+				return
+			}
+			if err := stopRelayWithDownstream(agent); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"message": "relay stopped"})
+		})
+
+		apiv1.GET("/chains", func(c *gin.Context) {
+			c.JSON(http.StatusOK, chainSnapshot())
+		})
+
+		apiv1.GET("/relay/doctor", func(c *gin.Context) {
+			withIPv6, err := strconv.ParseBool(c.DefaultQuery("with_ipv6", "false"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			interfacePrefix := c.DefaultQuery("interface_prefix", "ligolo")
+			c.JSON(http.StatusOK, relayDoctorReport(withIPv6, interfacePrefix))
+		})
+
+		apiv1.GET("/relay/ops", func(c *gin.Context) {
+			withIPv6, err := strconv.ParseBool(c.DefaultQuery("with_ipv6", "false"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			interfacePrefix := c.DefaultQuery("interface_prefix", "ligolo")
+			c.JSON(http.StatusOK, relayOpsReport(withIPv6, interfacePrefix))
+		})
+
+		apiv1.GET("/relay/autoheal", func(c *gin.Context) {
+			c.JSON(http.StatusOK, RelayAutoHealStatusSnapshot())
+		})
+
+		apiv1.POST("/relay/autoheal/run", func(c *gin.Context) {
+			var req RelayAutoHealRunRequest
+			if c.Request.Body != nil && c.Request.ContentLength != 0 {
+				if err := c.ShouldBindJSON(&req); err != nil {
+					c.JSON(http.StatusBadRequest, inputError)
+					return
+				}
+			}
+			policy := relayAutoHealPolicyWithOverrides(relayAutoHealPolicyFromConfig(), req)
+			run := RunRelayAutoHealOnce(policy)
+			status := http.StatusOK
+			if run.Status == "error" {
+				status = http.StatusInternalServerError
+			}
+			c.JSON(status, run)
+		})
+
+		apiv1.GET("/chain_routes", func(c *gin.Context) {
+			withIPv6, err := strconv.ParseBool(c.DefaultQuery("with_ipv6", "false"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			interfacePrefix := c.DefaultQuery("interface_prefix", "ligolo")
+			c.JSON(http.StatusOK, gin.H{"routes": chainRouteInfos(withIPv6, interfacePrefix)})
+		})
+
+		apiv1.GET("/chain_route_plan", func(c *gin.Context) {
+			withIPv6, err := strconv.ParseBool(c.DefaultQuery("with_ipv6", "false"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			start, err := strconv.ParseBool(c.DefaultQuery("start", "false"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			interfacePrefix := c.DefaultQuery("interface_prefix", "ligolo")
+			c.JSON(http.StatusOK, chainRoutePlan(withIPv6, interfacePrefix, start))
+		})
+
+		apiv1.GET("/chain_repair_plan", func(c *gin.Context) {
+			withIPv6, err := strconv.ParseBool(c.DefaultQuery("with_ipv6", "false"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			start, err := strconv.ParseBool(c.DefaultQuery("start", "false"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			pruneConflicts, err := strconv.ParseBool(c.DefaultQuery("prune_conflicts", "false"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			interfacePrefix := c.DefaultQuery("interface_prefix", "ligolo")
+			c.JSON(http.StatusOK, chainRepairPlan(withIPv6, interfacePrefix, start, pruneConflicts))
+		})
+
+		apiv1.GET("/chain_failover_plan", func(c *gin.Context) {
+			includeCommands, err := strconv.ParseBool(c.DefaultQuery("include_commands", "false"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			c.JSON(http.StatusOK, chainFailoverPlan(includeCommands))
+		})
+
+		apiv1.POST("/chain_failover", func(c *gin.Context) {
+			type ChainFailoverRequest struct {
+				IncludeCommands bool
+				All             bool
+				SessionIDs      []string
+				AgentIDs        []int
+			}
+			var req ChainFailoverRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			if !req.All && len(req.SessionIDs) == 0 && len(req.AgentIDs) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "chain failover apply requires All, SessionIDs, or AgentIDs"})
+				return
+			}
+			plan := applyChainFailoverPlan(req.IncludeCommands, req.All, req.SessionIDs, req.AgentIDs)
+			status := http.StatusOK
+			if plan.Status == "error" {
+				status = http.StatusInternalServerError
+			}
+			c.JSON(status, plan)
+		})
+
+		apiv1.POST("/chain_autoroute", func(c *gin.Context) {
+			type ChainAutorouteRequest struct {
+				WithIPv6        bool
+				InterfacePrefix string
+				Start           bool
+			}
+			var req ChainAutorouteRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			if req.InterfacePrefix == "" {
+				req.InterfacePrefix = "ligolo"
+			}
+			routes, err := configureChainAutoroutes(req.WithIPv6, req.InterfacePrefix, req.Start)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"message": "chain autoroute configured",
+				"routes":  routes,
+				"plan":    chainRoutePlan(req.WithIPv6, req.InterfacePrefix, req.Start),
+			})
+		})
+
+		apiv1.POST("/chain_repair", func(c *gin.Context) {
+			type ChainRepairRequest struct {
+				WithIPv6        bool
+				InterfacePrefix string
+				Start           bool
+				PruneConflicts  bool
+			}
+			var req ChainRepairRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			if req.InterfacePrefix == "" {
+				req.InterfacePrefix = "ligolo"
+			}
+			plan := applyChainRepairPlan(req.WithIPv6, req.InterfacePrefix, req.Start, req.PruneConflicts)
+			status := http.StatusOK
+			if plan.Status == "error" {
+				status = http.StatusInternalServerError
+			}
+			c.JSON(status, plan)
+		})
+
 		apiv1.POST("/tunnel/:id", func(c *gin.Context) {
 			type TunnelStart struct {
 				Interface string
@@ -441,6 +826,16 @@ func StartLigoloApi() {
 		})
 	}
 
+	// Optionally serve the MCP control plane over streamable HTTP at /mcp,
+	// behind the same JWT auth as /api/v1. Enabled with `-mcp-api`.
+	if config.Config.GetBool("web.mcp") {
+		mcpHandler := gin.WrapH(NewMCPHTTPHandler(config.Config.GetBool("web.mcpreadonly")))
+		mcpGroup := r.Group("/mcp", authMiddleware())
+		mcpGroup.Any("", mcpHandler)
+		mcpGroup.Any("/*any", mcpHandler)
+		logrus.Warn("MCP server mounted at /mcp (streamable HTTP, JWT-authenticated).")
+	}
+
 	if config.Config.GetBool("web.tls.enabled") {
 		// create tls config
 		tlsConfig, err := tlsutils.CertManager(&tlsutils.CertManagerConfig{
@@ -455,19 +850,27 @@ func StartLigoloApi() {
 		if err != nil {
 			logrus.Fatal(err)
 		}
-		server := http.Server{
-			Addr:      config.Config.GetString("web.listen"),
-			Handler:   r,
-			TLSConfig: tlsConfig,
-		}
+		server := apiHTTPServer(config.Config.GetString("web.listen"), r)
+		server.TLSConfig = tlsConfig
 		// start tls server
 		if err := server.ListenAndServeTLS("", ""); err != nil {
 			logrus.Fatal(err)
 		}
 	} else {
-		// listen and serve on 0.0.0.0:8080
-		if err := r.Run(config.Config.GetString("web.listen")); err != nil {
+		server := apiHTTPServer(config.Config.GetString("web.listen"), r)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logrus.Fatal(err)
 		}
+	}
+}
+
+func apiHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 }

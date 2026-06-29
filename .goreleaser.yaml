@@ -1,5 +1,5 @@
 version: 2
-project_name: ligolo-ng
+project_name: ligolo-ng-relay
 before:
   hooks:
     - go generate ./...
@@ -39,6 +39,34 @@ builds:
       - 6
       - 7
 
+  - main: ./cmd/relayctl
+    id: "relayctl"
+    binary: relayctl
+    env: [CGO_ENABLED=0]
+    goos:
+      - linux
+      - windows
+      - darwin
+      - freebsd
+      - openbsd
+    goarch:
+      - amd64
+      - arm64
+
+  - main: ./cmd/relaymcp
+    id: "relaymcp"
+    binary: relaymcp
+    env: [CGO_ENABLED=0]
+    goos:
+      - linux
+      - windows
+      - darwin
+      - freebsd
+      - openbsd
+    goarch:
+      - amd64
+      - arm64
+
 archives:
   - 
     id: "proxy"
@@ -54,6 +82,138 @@ archives:
     format_overrides:
       - goos: windows
         formats: ['zip']
+  -
+    id: "relayctl"
+    ids: ['relayctl']
+    name_template: "{{ .ProjectName }}_{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: ['zip']
+  -
+    id: "relaymcp"
+    ids: ['relaymcp']
+    name_template: "{{ .ProjectName }}_{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: ['zip']
+
+dockers:
+  - id: proxy-amd64
+    ids: ['proxy']
+    goos: linux
+    goarch: amd64
+    dockerfile: build/package/proxy.Dockerfile
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relay-proxy:{{ .Version }}-amd64"
+  - id: proxy-arm64
+    ids: ['proxy']
+    goos: linux
+    goarch: arm64
+    dockerfile: build/package/proxy.Dockerfile
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relay-proxy:{{ .Version }}-arm64"
+  - id: agent-amd64
+    ids: ['agent']
+    goos: linux
+    goarch: amd64
+    dockerfile: build/package/agent.Dockerfile
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relay-agent:{{ .Version }}-amd64"
+  - id: agent-arm64
+    ids: ['agent']
+    goos: linux
+    goarch: arm64
+    dockerfile: build/package/agent.Dockerfile
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relay-agent:{{ .Version }}-arm64"
+  - id: relayctl-amd64
+    ids: ['relayctl']
+    goos: linux
+    goarch: amd64
+    dockerfile: build/package/relayctl.Dockerfile
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relayctl:{{ .Version }}-amd64"
+  - id: relayctl-arm64
+    ids: ['relayctl']
+    goos: linux
+    goarch: arm64
+    dockerfile: build/package/relayctl.Dockerfile
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relayctl:{{ .Version }}-arm64"
+  - id: relaymcp-amd64
+    ids: ['relaymcp']
+    goos: linux
+    goarch: amd64
+    dockerfile: build/package/relaymcp.Dockerfile
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relaymcp:{{ .Version }}-amd64"
+  - id: relaymcp-arm64
+    ids: ['relaymcp']
+    goos: linux
+    goarch: arm64
+    dockerfile: build/package/relaymcp.Dockerfile
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relaymcp:{{ .Version }}-arm64"
+
+docker_manifests:
+  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relay-proxy:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relay-proxy:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relay-proxy:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relay-agent:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relay-agent:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relay-agent:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relayctl:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relayctl:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relayctl:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relaymcp:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relaymcp:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ligolo-ng-relaymcp:{{ .Version }}-arm64"
+
+docker_signs:
+  - id: docker-images
+    artifacts: all
+    cmd: cosign
+    args:
+      - sign
+      - "${artifact}@${digest}"
+      - --yes
+    output: true
+
+sboms:
+  - id: archive-sboms
+    artifacts: archive
+    documents:
+      - "${artifact}.spdx.sbom.json"
+    disable: false
+
+checksum:
+  name_template: 'checksums.txt'
+
+signs:
+  - id: cosign-checksums
+    artifacts: checksum
+    cmd: sh
+    signature: "${artifact}.sigstore.json"
+    args:
+      - -c
+      - |
+        if [ -n "$COSIGN_KEY" ]; then
+          cosign sign-blob --key "$COSIGN_KEY" --bundle="${signature}" --new-bundle-format "${artifact}" --yes
+        else
+          cosign sign-blob --bundle="${signature}" --new-bundle-format "${artifact}" --yes
+        fi
+      - sh
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
 release:
   github:
   disable: false

@@ -1,0 +1,13 @@
+Ligolo-ng Relay proxy is installed.
+
+API service:
+  {{ include "ligolo-ng-relay.fullname" . }}:{{ .Values.service.ports.api }}
+
+Proxy listener:
+  {{ include "ligolo-ng-relay.fullname" . }}:{{ .Values.service.ports.proxy }}
+
+The proxy pod requires /dev/net/tun and NET_ADMIN. Keep the API behind a private
+network or an authenticated reverse proxy.
+
+Set proxy.webPassword or proxy.existingSecret before installing in a real
+cluster.

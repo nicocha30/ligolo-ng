@@ -1,6 +1,6 @@
 .idea/*
 setuptun.sh
 dist/
-ligolo-ng.history
+ligolo-ng-relay.history
 ligolo-selfcerts/
-ligolo-ng.yaml
+ligolo-ng-relay.yaml

@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ligolo-ng-relay.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "ligolo-ng-relay.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ligolo-ng-relay.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "ligolo-ng-relay.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: proxy
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -daemon
+            {{- if .Values.proxy.selfcert }}
+            - -selfcert
+            {{- end }}
+            - -laddr
+            - {{ .Values.proxy.listen | quote }}
+            - -api
+            - -api-laddr
+            - {{ .Values.proxy.apiListen | quote }}
+            - -web-user
+            - $(LIGOLO_WEB_USER)
+            - -web-password
+            - $(LIGOLO_WEB_PASSWORD)
+          env:
+            - name: LIGOLO_WEB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (include "ligolo-ng-relay.fullname" .) .Values.proxy.existingSecret }}
+                  key: web-user
+            - name: LIGOLO_WEB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (include "ligolo-ng-relay.fullname" .) .Values.proxy.existingSecret }}
+                  key: web-password
+          ports:
+            - name: proxy
+              containerPort: 11601
+            - name: api
+              containerPort: 8080
+            - name: relay
+              containerPort: 11602
+          securityContext:
+            privileged: {{ .Values.securityContext.privileged }}
+            capabilities:
+              add:
+                {{- range .Values.securityContext.capabilities.add }}
+                - {{ . | quote }}
+                {{- end }}
+          workingDir: /etc/ligolo-ng-relay-proxy
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ligolo-ng-relay-proxy
+            {{- if .Values.tunDevice.enabled }}
+            - name: tun
+              mountPath: /dev/net/tun
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "ligolo-ng-relay.fullname" . }}-config
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.tunDevice.enabled }}
+        - name: tun
+          hostPath:
+            path: {{ .Values.tunDevice.hostPath | quote }}
+            type: CharDevice
+        {{- end }}
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}

@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -17,20 +17,24 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"github.com/nicocha30/ligolo-ng/cmd/proxy/config"
-	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
 	"log"
 	"os"
+	"os/signal"
 	"runtime"
 	"runtime/pprof"
 	"strings"
+	"syscall"
 
+	"github.com/allsmog/ligolo-ng-relay/cmd/proxy/app"
+	"github.com/allsmog/ligolo-ng-relay/cmd/proxy/config"
+	"github.com/allsmog/ligolo-ng-relay/pkg/controller"
+	"github.com/allsmog/ligolo-ng-relay/pkg/tlsutils"
 	"github.com/desertbit/grumble"
 	"github.com/hashicorp/yamux"
-	"github.com/nicocha30/ligolo-ng/cmd/proxy/app"
-	"github.com/nicocha30/ligolo-ng/pkg/controller"
 	"github.com/sirupsen/logrus"
 )
 
@@ -54,14 +58,27 @@ func main() {
 	var hideBanner = flag.Bool("nobanner", false, "don't show banner on startup")
 	var configFile = flag.String("config", "", "the config file to use")
 	var daemonMode = flag.Bool("daemon", false, "run as daemon mode (no CLI)")
+	var apiEnabled = flag.Bool("api", false, "enable the Web/API server without editing the config file")
 	var apiListenAddr = flag.String("api-laddr", "", "API server listening address (default: 127.0.0.1:8080)")
+	var webDisableUI = flag.Bool("no-web-ui", false, "disable the embedded Web UI while keeping the API server available")
+	var relayAutoHeal = flag.Bool("relay-autoheal", false, "enable the relay auto-heal reconciler")
+	var relayAutoHealApply = flag.Bool("relay-autoheal-apply", false, "allow relay auto-heal to apply supported repairs and failovers")
+	var mcpStdio = flag.Bool("mcp", false, "run an MCP server over stdio (headless; the proxy still listens for agents)")
+	var mcpReadOnly = flag.Bool("mcp-read-only", false, "expose only read-only MCP tools (applies to -mcp and -mcp-api)")
+	var mcpAPI = flag.Bool("mcp-api", false, "mount the MCP server over streamable HTTP at /mcp on the API server (implies -api)")
+	var webUser string
+	var webPassword string
 	var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
 	var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
+	flag.StringVar(&webUser, "web-user", "", "Web/API username override")
+	flag.StringVar(&webUser, "api-user", "", "alias for -web-user")
+	flag.StringVar(&webPassword, "web-password", "", "Web/API password override")
+	flag.StringVar(&webPassword, "api-password", "", "alias for -web-password")
 
 	flag.Usage = func() {
-		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
-		fmt.Println("Made in France with love by @Nicocha30!")
-		fmt.Println("https://github.com/nicocha30/ligolo-ng")
+		fmt.Printf("Ligolo-ng Relay %s / %s / %s\n", version, commit, date)
+		fmt.Println("Maintained fork of upstream Ligolo-ng by @Nicocha30")
+		fmt.Println("https://github.com/allsmog/ligolo-ng-relay")
 		fmt.Printf("\nUsage of %s:\n", os.Args[0])
 		flag.PrintDefaults()
 	}
@@ -79,14 +96,42 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	config.InitConfig(*configFile)
+	app.MCPServerVersion = version
+	headless := *daemonMode || *mcpStdio
+	config.InitConfig(*configFile, headless)
 
+	if *apiEnabled {
+		config.Config.Set("web.enabled", true)
+	}
 	if *apiListenAddr != "" {
 		config.Config.Set("web.listen", *apiListenAddr)
 	}
+	if *webDisableUI {
+		config.Config.Set("web.enableui", false)
+	}
+	if *relayAutoHeal {
+		config.Config.Set("relay.autoheal.enabled", true)
+	}
+	if *relayAutoHealApply {
+		config.Config.Set("relay.autoheal.enabled", true)
+		config.Config.Set("relay.autoheal.apply", true)
+	}
+	if webUser != "" || webPassword != "" {
+		if webUser == "" || webPassword == "" {
+			logrus.Fatal("both -web-user and -web-password must be set")
+		}
+		if err := config.SetWebUserPassword(webUser, webPassword); err != nil {
+			logrus.Fatal(err)
+		}
+	}
+	if *mcpAPI {
+		config.Config.Set("web.enabled", true)
+		config.Config.Set("web.mcp", true)
+	}
+	config.Config.Set("web.mcpreadonly", *mcpReadOnly)
 
 	if *versionFlag {
-		fmt.Printf("Ligolo-ng %s / %s / %s\n", version, commit, date)
+		fmt.Printf("Ligolo-ng Relay %s / %s / %s\n", version, commit, date)
 		return
 	}
 
@@ -101,7 +146,7 @@ func main() {
 		allowDomains = strings.Split(*domainWhitelist, ",")
 	}
 
-	if !*hideBanner && !*daemonMode {
+	if !*hideBanner && !headless {
 		app.App.SetPrintASCIILogo(func(a *grumble.App) {
 			a.Println("    __    _             __                       ")
 			a.Println("   / /   (_)___ _____  / /___        ____  ____ _")
@@ -170,6 +215,7 @@ func main() {
 				for {
 					select {
 					case <-agent.Session.CloseChan(): // Agent closed
+						app.ChainMgr.RemoveAgent(agent.SessionID)
 						logrus.WithFields(logrus.Fields{"remote": remoteConn.RemoteAddr(), "name": agent.Name, "id": agent.SessionID}).Warnf("Agent dropped.")
 						return
 					}
@@ -184,11 +230,21 @@ func main() {
 	}
 
 	if config.Config.GetBool("web.enabled") {
-		logrus.Infof("Starting Ligolo-ng Web, API URL is set to: %s", app.GetAPIUrl())
+		logrus.Infof("Starting Ligolo-ng Relay Web, API URL is set to: %s", app.GetAPIUrl())
 		go app.StartLigoloApi()
 	}
+	app.StartRelayAutoHealFromConfig()
 
-	if *daemonMode {
+	if *mcpStdio {
+		// MCP-over-stdio is the operator frontend; the proxy keeps serving
+		// agents in the background. stdout carries the MCP stream, so logs
+		// (logrus) must stay on stderr and the banner is suppressed (headless).
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := app.RunMCPStdio(ctx, *mcpReadOnly); err != nil && !errors.Is(err, context.Canceled) {
+			logrus.Fatal(err)
+		}
+	} else if *daemonMode {
 		proxyController.WaitForFinished()
 	} else {
 		// Grumble doesn't like cli args

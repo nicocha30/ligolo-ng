@@ -1,0 +1,23 @@
+[Unit]
+Description=Ligolo-ng Relay proxy
+Documentation=https://github.com/allsmog/ligolo-ng-relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/ligolo-ng-relay-proxy/proxy.env
+WorkingDirectory=/etc/ligolo-ng-relay-proxy
+ExecStart=/usr/local/bin/proxy -daemon -selfcert -laddr ${LIGOLO_PROXY_LISTEN} -api -api-laddr ${LIGOLO_API_LISTEN} -web-user ${LIGOLO_WEB_USER} -web-password ${LIGOLO_WEB_PASSWORD}
+Restart=always
+RestartSec=5s
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+DeviceAllow=/dev/net/tun rw
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/etc/ligolo-ng-relay-proxy
+
+[Install]
+WantedBy=multi-user.target

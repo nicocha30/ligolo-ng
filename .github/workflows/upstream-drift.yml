@@ -1,0 +1,22 @@
+name: upstream-drift
+
+on:
+  schedule:
+    - cron: '0 12 * * 1'
+  workflow_dispatch:
+
+jobs:
+  upstream-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Add upstream
+        run: |
+          git remote add upstream https://github.com/nicocha30/ligolo-ng.git
+          git fetch upstream master
+      - name: Ensure upstream is an ancestor
+        run: |
+          git merge-base --is-ancestor upstream/master HEAD

@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -198,7 +198,7 @@ func (t *Tun) Routes() (routes []Route) {
 				maskip = &route.Inet4Addr{IP: [4]byte{255, 255, 255, 255}}
 			}
 
-			dstIpNet := net.IPNet{dstIP.IP[:], maskip.IP[:]}
+			dstIpNet := net.IPNet{IP: dstIP.IP[:], Mask: maskip.IP[:]}
 
 			target := Route{
 				Dst: dstIpNet.String(),
@@ -211,7 +211,7 @@ func (t *Tun) Routes() (routes []Route) {
 			if !ok {
 				maskip = &route.Inet6Addr{IP: [16]byte(net.IPv6unspecified)}
 			}
-			dstIpNet := &net.IPNet{dstIP.IP[:], maskip.IP[:]}
+			dstIpNet := &net.IPNet{IP: dstIP.IP[:], Mask: maskip.IP[:]}
 			target := Route{
 				Dst: dstIpNet.String(),
 				Src: "",

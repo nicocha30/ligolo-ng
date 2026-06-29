@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -17,22 +17,35 @@
 package smartping
 
 import (
-	"fmt"
+	"errors"
+	"os"
+	"strings"
 	"testing"
 )
 
 func TestRawPinger(t *testing.T) {
 	r, err := RawPinger("127.0.0.1")
 	if err != nil {
-		t.Error(err)
+		if isPermissionError(err) {
+			t.Skipf("raw ICMP socket requires elevated permissions: %v", err)
+		}
+		t.Fatal(err)
 	}
-	fmt.Print(r)
+	if !r {
+		t.Fatal("expected localhost to respond to raw ping")
+	}
+}
+
+func isPermissionError(err error) bool {
+	return errors.Is(err, os.ErrPermission) || strings.Contains(strings.ToLower(err.Error()), "permission denied")
 }
 
 func TestCommandPinger(t *testing.T) {
 	r, err := CommandPinger("127.0.0.1")
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
-	fmt.Print(r)
+	if !r {
+		t.Fatal("expected localhost to respond to command ping")
+	}
 }

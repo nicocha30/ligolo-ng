@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -19,6 +19,7 @@ package netstack
 import (
 	"errors"
 	"fmt"
+	"github.com/allsmog/ligolo-ng-relay/pkg/proxy/netstack/tun"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/header"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/network/ipv4"
@@ -27,7 +28,6 @@ import (
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/icmp"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/tcp"
 	"github.com/nicocha30/gvisor-ligolo/pkg/tcpip/transport/udp"
-	"github.com/nicocha30/ligolo-ng/pkg/proxy/netstack/tun"
 	"github.com/sirupsen/logrus"
 	"sync"
 )

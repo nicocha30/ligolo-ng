@@ -1,0 +1,16 @@
+[Unit]
+Description=Ligolo-ng Relay agent %i
+Documentation=https://github.com/allsmog/ligolo-ng-relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/ligolo-ng-relay-agent/%i.env
+ExecStart=/usr/local/bin/agent -connect ${LIGOLO_CONNECT} -accept-fingerprint ${LIGOLO_FINGERPRINT} -relay-token ${LIGOLO_RELAY_TOKEN} -retry -reconnect
+Restart=always
+RestartSec=10s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

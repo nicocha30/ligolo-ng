@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -23,6 +23,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
+
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -158,6 +160,21 @@ func secureConfigPasswords() {
 	Config.Set("web.users", users)
 }
 
+func SetWebUserPassword(username, password string) error {
+	if username == "" {
+		return errors.New("web username cannot be empty")
+	}
+	if password == "" {
+		return errors.New("web password cannot be empty")
+	}
+	hash, err := argon2Hash(password)
+	if err != nil {
+		return err
+	}
+	Config.Set("web.users", map[string]string{username: hash})
+	return nil
+}
+
 func ask(question string) bool {
 	result := false
 	prompt := &survey.Confirm{
@@ -167,18 +184,27 @@ func ask(question string) bool {
 	return result
 }
 
-func InitConfig(configFile string) {
+func InitConfig(configFile string, nonInteractive ...bool) {
 	var firstStart bool
+	noPrompt := len(nonInteractive) > 0 && nonInteractive[0]
+	explicitConfigFile := configFile != ""
 	if configFile == "" {
-		configFile = "ligolo-ng.yaml"
+		configFile = "ligolo-ng-relay.yaml"
 	} else {
 		if _, err := os.Stat(configFile); errors.Is(err, os.ErrNotExist) {
 			logrus.Fatal("config file does not exist")
 		}
 	}
-	Config.SetConfigName(configFile)
+
+	if explicitConfigFile && (filepath.IsAbs(configFile) || filepath.Dir(configFile) != ".") {
+		Config.SetConfigFile(configFile)
+	} else {
+		Config.SetConfigName(configFile)
+	}
 	Config.SetConfigType("yaml")
 	Config.AddConfigPath(".")
+	Config.AddConfigPath("$HOME/.ligolo-ng-relay-proxy")
+	Config.AddConfigPath("/etc/ligolo-ng-relay-proxy")
 	Config.AddConfigPath("$HOME/.ligolo-proxy")
 	Config.AddConfigPath("/etc/ligolo-proxy")
 
@@ -201,17 +227,22 @@ func InitConfig(configFile string) {
 	}
 
 	if firstStart {
-		enableWebUI := ask("Enable Ligolo-ng WebUI?")
+		enableWebUI := false
+		if !noPrompt {
+			enableWebUI = ask("Enable Ligolo-ng Relay WebUI?")
+		}
 		Config.SetDefault("web.enabled", enableWebUI)
 		Config.SetDefault("web.enableui", enableWebUI)
+		// Always default to a safe loopback CORS origin so the API can start
+		// even when the WebUI is disabled (e.g. `-api -no-web-ui`): gin-contrib/cors
+		// panics if AllowOrigins is empty while credentials are enabled.
+		Config.SetDefault("web.corsAllowedOrigin", []string{"http://127.0.0.1:8080"})
 
 		if enableWebUI {
-			if ask("Allow CORS Access from https://webui.ligolo.ng?") {
+			if !noPrompt && ask("Allow CORS Access from https://webui.ligolo.ng?") {
 				Config.SetDefault("web.corsAllowedOrigin", []string{"https://webui.ligolo.ng"})
-			} else {
-				Config.SetDefault("web.corsAllowedOrigin", []string{"http://127.0.0.1:8080"})
 			}
-			logrus.Warn("WebUI enabled, default username and login are ligolo:password - make sure to update ligolo-ng.yaml to change credentials!")
+			logrus.Warn("WebUI enabled, default username and login are ligolo:password - make sure to update ligolo-ng-relay.yaml to change credentials!")
 		}
 	} else {
 		Config.SetDefault("web.enabled", false)
@@ -231,6 +262,17 @@ func InitConfig(configFile string) {
 	Config.SetDefault("web.tls.keyfile", "")
 	Config.SetDefault("web.tls.alloweddomains", []string{})
 	Config.SetDefault("web.tls.selfcertdomain", "ligolo")
+	Config.SetDefault("relay.autoheal.enabled", false)
+	Config.SetDefault("relay.autoheal.apply", false)
+	Config.SetDefault("relay.autoheal.interval_seconds", 30)
+	Config.SetDefault("relay.autoheal.with_ipv6", false)
+	Config.SetDefault("relay.autoheal.interface_prefix", "ligolo")
+	Config.SetDefault("relay.autoheal.start_tunnels", false)
+	Config.SetDefault("relay.autoheal.repair", true)
+	Config.SetDefault("relay.autoheal.prune_conflicts", false)
+	Config.SetDefault("relay.autoheal.failover", true)
+	Config.SetDefault("relay.autoheal.max_repair_actions", 10)
+	Config.SetDefault("relay.autoheal.max_failovers", 1)
 	secureConfigPasswords()
 
 	secret, err := generateRandomBytes(32)

@@ -26,12 +26,12 @@ If applicable, add screenshots to help explain your problem.
 **Proxy information:**
  - OS: [e.g. Linux (Fedora 40)]
  - Architecture [e.g. amd64,arm64]
- - Version [e.g. Ligolo-ng v0.6.1]
+ - Version [e.g. Ligolo-ng Relay v0.6.1]
 
 **Agent information:**
  - OS: [e.g. Linux (Fedora 40)]
  - Architecture [e.g. amd64,arm64]
- - Version [e.g. Ligolo-ng v0.6.1]
+ - Version [e.g. Ligolo-ng Relay v0.6.1]
 
 **Additional context**
 Add any other context about the problem here (network information, routes, ...).

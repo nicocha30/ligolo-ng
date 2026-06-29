@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -21,17 +21,16 @@ package app
 import (
 	"errors"
 	"fmt"
-	"net"
 	"sort"
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
+	"github.com/allsmog/ligolo-ng-relay/cmd/proxy/config"
+	"github.com/allsmog/ligolo-ng-relay/pkg/proxy/netinfo"
+	"github.com/allsmog/ligolo-ng-relay/pkg/utils/codenames"
 	"github.com/desertbit/grumble"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/nicocha30/ligolo-ng/cmd/proxy/config"
-	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo"
-	"github.com/nicocha30/ligolo-ng/pkg/utils/codenames"
 	"github.com/sirupsen/logrus"
 )
 
@@ -119,34 +118,34 @@ func init() {
 		Run: func(c *grumble.Context) error {
 			ifName := c.Flags.String("name")
 			ifID := c.Flags.Int("id")
-			
+
 			// If neither name nor ID provided, show error
 			if ifName == "" && ifID == -1 {
 				return errors.New("please specify either --name [interface] or --id [number]")
 			}
-			
+
 			// If ID is provided, look up the interface name
 			if ifID != -1 {
 				interfaces, err := config.GetInterfaceConfigState()
 				if err != nil {
 					return err
 				}
-				
+
 				// Sort interface names to match interface_list ordering
 				var interfaceNames []string
 				for name := range interfaces {
 					interfaceNames = append(interfaceNames, name)
 				}
 				sort.Strings(interfaceNames)
-				
+
 				if ifID < 0 || ifID >= len(interfaceNames) {
 					return fmt.Errorf("invalid interface ID: %d. Use 'interface_list' to see valid IDs", ifID)
 				}
-				
+
 				ifName = interfaceNames[ifID]
 				logrus.Infof("Deleting interface #%d: %s", ifID, ifName)
 			}
-			
+
 			if config.GetInterfaceConfig(ifName) != nil {
 				if ask("Remove all interface routes and settings from config?") {
 					if err := config.DeleteInterfaceConfig(ifName); err != nil {
@@ -298,33 +297,28 @@ func init() {
 		Name:      "autoroute",
 		Help:      "Setup everything for you (interfaces, routes & tunnel)",
 		HelpGroup: "Tunneling",
-		Usage:     "autoroute [--interface name]",
+		Usage:     "autoroute [--agent id] [--interface name]",
 		Flags: func(f *grumble.Flags) {
+			f.IntL("agent", 0, "Agent ID to autoroute (defaults to the current session)")
 			f.BoolL("with-ipv6", false, "Include IPv6 addresses")
 			f.StringL("interface", "", "Custom interface name (if provided, skips interface creation prompt)")
 		},
 		Run: func(c *grumble.Context) error {
-			if _, ok := AgentList[CurrentAgentID]; !ok {
+			agentID := c.Flags.Int("agent")
+			if agentID == 0 {
+				agentID = CurrentAgentID
+			}
+			if _, ok := AgentList[agentID]; !ok {
 				return ErrInvalidAgent
 			}
-			CurrentAgent := AgentList[CurrentAgentID]
+			CurrentAgent := AgentList[agentID]
 			// Note: Network information is not refreshed when calling this command
 			if CurrentAgent.Session == nil {
 				return ErrInvalidAgent
 			}
-			var possibleRoutes []string
-			for _, ifaceInfo := range CurrentAgent.Network {
-				for _, address := range ifaceInfo.Addresses {
-					ip, _, err := net.ParseCIDR(address)
-					if err != nil {
-						continue
-					}
-					if !ip.IsLoopback() {
-						if ip.To4() != nil || c.Flags.Bool("with-ipv6") {
-							possibleRoutes = append(possibleRoutes, address)
-						}
-					}
-				}
+			possibleRoutes := candidateRoutes(CurrentAgent, c.Flags.Bool("with-ipv6"))
+			if len(possibleRoutes) == 0 {
+				return errors.New("no routes available for selected agent")
 			}
 			routePrompt := &survey.MultiSelect{
 				Message: "Select routes to add:",
@@ -340,12 +334,12 @@ func init() {
 
 			var selectedIface string
 			customName := c.Flags.String("interface")
-			
+
 			// If --interface flag is provided, use it directly without prompting
 			if customName != "" {
 				logrus.Infof("Using custom interface name: %s", customName)
 				selectedIface = customName
-				
+
 				// Check if interface physically exists
 				if netinfo.InterfaceExist(selectedIface) {
 					logrus.Warnf("Interface %s already exists physically", selectedIface)
@@ -376,13 +370,13 @@ func init() {
 					if err := survey.AskOne(ifaceNamePrompt, &customIfaceName); err != nil {
 						return err
 					}
-					
+
 					var ifName string
 					if customIfaceName != "" {
 						// User provided a custom name
 						ifName = customIfaceName
 						logrus.Infof("Using custom interface name: %s", ifName)
-						
+
 						// Check if it already exists
 						if netinfo.InterfaceExist(ifName) {
 							logrus.Warnf("Interface %s already exists physically", ifName)
@@ -402,7 +396,7 @@ func init() {
 						}
 
 						ifName = codenames.Generate(rng)
-						
+
 						// Make sure the randomly generated name doesn't already exist
 						for netinfo.InterfaceExist(ifName) {
 							logrus.Warnf("Interface %s already exists, generating a new name...", ifName)
@@ -430,7 +424,7 @@ func init() {
 								routes = append(routes, route.Destination)
 							}
 							routeStr := strings.Join(routes, ", ")
-							yellowRoutes := text.Colors{text.FgYellow}.Sprintf(routeStr)
+							yellowRoutes := text.Colors{text.FgYellow}.Sprintf("%s", routeStr)
 							displayName = fmt.Sprintf("%s %s", ifName, yellowRoutes)
 						}
 						ifaceOptions = append(ifaceOptions, displayName)
@@ -450,7 +444,7 @@ func init() {
 					}
 
 					selectedIface = ifaceMap[selectedIfaceDisplay]
-					
+
 					// Check if the selected existing interface is being used by another agent
 					for _, agent := range AgentList {
 						if agent.Running && agent.Interface == selectedIface && agent != CurrentAgent {
@@ -470,7 +464,7 @@ func init() {
 						break
 					}
 				}
-				
+
 				if !interfaceInUse {
 					logrus.Warnf("Interface %s exists but is not in use. Removing it to avoid conflicts...", selectedIface)
 					stun, err := netinfo.GetTunByName(selectedIface)
@@ -515,6 +509,178 @@ func init() {
 			} else {
 				logrus.Infof("You can start the tunnel with: start --tun %s", selectedIface)
 			}
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
+		Name:      "chain_routes",
+		Help:      "Show route candidates across all online agents",
+		Usage:     "chain_routes [--with-ipv6] [--interface-prefix prefix]",
+		HelpGroup: "Relay",
+		Flags: func(f *grumble.Flags) {
+			f.BoolL("with-ipv6", false, "Include IPv6 addresses")
+			f.StringL("interface-prefix", "ligolo", "Interface name prefix used for suggested chain autoroutes")
+		},
+		Run: func(c *grumble.Context) error {
+			routes := chainRouteInfos(c.Flags.Bool("with-ipv6"), c.Flags.String("interface-prefix"))
+			if len(routes) == 0 {
+				return errors.New("no route candidates available")
+			}
+
+			t := table.NewWriter()
+			t.SetStyle(table.StyleLight)
+			t.SetTitle("Chain route candidates")
+			t.AppendHeader(table.Row{"Agent ID", "Agent", "Hop", "Via", "Interface", "Route", "Warning"})
+			for _, route := range routes {
+				via := "direct"
+				if route.ParentSessionID != "" {
+					via = route.ParentSessionID
+				}
+				t.AppendRow(table.Row{route.AgentID, route.Name, route.HopDepth, via, route.Interface, route.Route, route.Warning})
+			}
+			App.Println(t.Render())
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
+		Name:      "chain_plan",
+		Help:      "Preview smart route decisions across the relay chain",
+		Usage:     "chain_plan [--interface-prefix ligolo] [--with-ipv6] [--start]",
+		HelpGroup: "Relay",
+		Flags: func(f *grumble.Flags) {
+			f.BoolL("with-ipv6", false, "Include IPv6 addresses")
+			f.StringL("interface-prefix", "ligolo", "Interface name prefix for generated interface configs")
+			f.BoolL("start", false, "Include tunnel start actions in the dry-run plan")
+		},
+		Run: func(c *grumble.Context) error {
+			plan := chainRoutePlan(c.Flags.Bool("with-ipv6"), c.Flags.String("interface-prefix"), c.Flags.Bool("start"))
+			if len(plan.Decisions) == 0 {
+				return errors.New("no route candidates available")
+			}
+
+			t := table.NewWriter()
+			t.SetStyle(table.StyleLight)
+			t.SetTitle("Smart chain route plan")
+			t.AppendHeader(table.Row{"Decision", "Agent ID", "Agent", "Hop", "Interface", "Route", "Score", "Reason"})
+			for _, decision := range plan.Decisions {
+				t.AppendRow(table.Row{decision.Decision, decision.AgentID, decision.Name, decision.HopDepth, decision.Interface, decision.Route, decision.Score, decision.Reason})
+			}
+			App.Println(t.Render())
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
+		Name:      "chain_autoroute",
+		Help:      "Configure selected per-agent interfaces and routes across the relay chain",
+		Usage:     "chain_autoroute [--interface-prefix ligolo] [--with-ipv6] [--start]",
+		HelpGroup: "Relay",
+		Flags: func(f *grumble.Flags) {
+			f.BoolL("with-ipv6", false, "Include IPv6 addresses")
+			f.StringL("interface-prefix", "ligolo", "Interface name prefix for generated interface configs")
+			f.BoolL("start", false, "Start tunnels after configuring routes")
+		},
+		Run: func(c *grumble.Context) error {
+			routes, err := configureChainAutoroutes(c.Flags.Bool("with-ipv6"), c.Flags.String("interface-prefix"), c.Flags.Bool("start"))
+			if err != nil {
+				return err
+			}
+			for _, route := range routes {
+				logrus.Infof("Configured %s on %s for agent %d (%s)", route.Route, route.Interface, route.AgentID, route.Name)
+			}
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
+		Name:      "chain_repair",
+		Help:      "Preview or apply safe relay-chain repair actions",
+		Usage:     "chain_repair [--interface-prefix ligolo] [--with-ipv6] [--start] [--prune-conflicts] [--apply]",
+		HelpGroup: "Relay",
+		Flags: func(f *grumble.Flags) {
+			f.BoolL("with-ipv6", false, "Include IPv6 addresses")
+			f.StringL("interface-prefix", "ligolo", "Interface name prefix for generated interface configs")
+			f.BoolL("start", false, "Include or apply tunnel start actions")
+			f.BoolL("prune-conflicts", false, "Remove configured lower-ranked duplicate routes")
+			f.BoolL("apply", false, "Apply supported repair actions")
+		},
+		Run: func(c *grumble.Context) error {
+			plan := chainRepairPlan(c.Flags.Bool("with-ipv6"), c.Flags.String("interface-prefix"), c.Flags.Bool("start"), c.Flags.Bool("prune-conflicts"))
+			if c.Flags.Bool("apply") {
+				plan = applyChainRepairPlan(c.Flags.Bool("with-ipv6"), c.Flags.String("interface-prefix"), c.Flags.Bool("start"), c.Flags.Bool("prune-conflicts"))
+			}
+			if len(plan.Actions) == 0 {
+				App.Println("No repair actions pending.")
+				return nil
+			}
+
+			t := table.NewWriter()
+			t.SetStyle(table.StyleLight)
+			t.SetTitle("Relay chain repair plan")
+			t.AppendHeader(table.Row{"Type", "Agent ID", "Interface", "Route", "Supported", "Applied", "Reason", "Error"})
+			for _, action := range plan.Actions {
+				t.AppendRow(table.Row{action.Type, action.AgentID, action.Interface, action.Route, action.ApplySupported, action.Applied, action.Reason, action.Error})
+			}
+			App.Println(t.Render())
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
+		Name:      "chain_failover",
+		Help:      "Show relay parent failover recommendations",
+		Usage:     "chain_failover [--include-commands] [--apply] [--all] [--sessions session-a,session-b] [--agents 2,3]",
+		HelpGroup: "Relay",
+		Flags: func(f *grumble.Flags) {
+			f.BoolL("include-commands", false, "Include downstream reconnect commands with relay tokens")
+			f.BoolL("apply", false, "Apply selected failover recommendations")
+			f.BoolL("all", false, "Apply every supported failover recommendation")
+			f.StringL("sessions", "", "Comma-separated SessionIDs to fail over")
+			f.StringL("agents", "", "Comma-separated agent IDs to fail over")
+		},
+		Run: func(c *grumble.Context) error {
+			includeCommands := c.Flags.Bool("include-commands")
+			plan := ChainFailoverPlan{}
+			if c.Flags.Bool("apply") {
+				sessionIDs := splitCSVStrings(c.Flags.String("sessions"))
+				agentIDs, err := splitCSVInts(c.Flags.String("agents"))
+				if err != nil {
+					return err
+				}
+				if !c.Flags.Bool("all") && len(sessionIDs) == 0 && len(agentIDs) == 0 {
+					return errors.New("chain_failover --apply requires --all, --sessions, or --agents")
+				}
+				plan = applyChainFailoverPlan(includeCommands, c.Flags.Bool("all"), sessionIDs, agentIDs)
+			} else {
+				plan = chainFailoverPlan(includeCommands)
+			}
+			if len(plan.Recommendations) == 0 {
+				App.Println("No failover recommendations.")
+				return nil
+			}
+
+			t := table.NewWriter()
+			t.SetStyle(table.StyleLight)
+			t.SetTitle("Relay parent failover plan")
+			header := table.Row{"Agent ID", "Agent", "Current Parent", "Recommended Parent", "Apply", "Applied", "Reason", "Error"}
+			if includeCommands {
+				header = append(header, "Connect Command")
+			}
+			t.AppendHeader(header)
+			for _, recommendation := range plan.Recommendations {
+				recommendedParent := "-"
+				if recommendation.RecommendedParent != nil {
+					recommendedParent = fmt.Sprintf("%d - %s", recommendation.RecommendedParent.AgentID, recommendation.RecommendedParent.Name)
+				}
+				row := table.Row{recommendation.AgentID, recommendation.Name, recommendation.CurrentParentName, recommendedParent, recommendation.ApplySupported, recommendation.Applied, recommendation.Reason, recommendation.Error}
+				if includeCommands {
+					row = append(row, recommendation.ConnectCommand)
+				}
+				t.AppendRow(row)
+			}
+			App.Println(t.Render())
 			return nil
 		},
 	})

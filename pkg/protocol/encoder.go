@@ -1,4 +1,4 @@
-// Ligolo-ng
+// Ligolo-ng Relay
 // Copyright (C) 2025 Nicolas Chatelain (nicocha30)
 
 // This program is free software: you can redistribute it and/or modify
@@ -18,18 +18,20 @@ package protocol
 
 import (
 	"fmt"
-	"github.com/shamaton/msgpack/v2"
 	"io"
+
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // LigoloEncoder is the structure containing the writer used when encoding Envelopes
 type LigoloEncoder struct {
-	writer io.Writer
+	writer  io.Writer
+	encoder *msgpack.Encoder
 }
 
-// NewEncoder encode Ligolo-ng packets
+// NewEncoder encode Ligolo-ng Relay packets
 func NewEncoder(writer io.Writer) LigoloEncoder {
-	return LigoloEncoder{writer: writer}
+	return LigoloEncoder{writer: writer, encoder: msgpack.NewEncoder(writer)}
 }
 
 func payloadTypeFromInterface(payload interface{}) (uint8, error) {
@@ -66,6 +68,20 @@ func payloadTypeFromInterface(payload interface{}) (uint8, error) {
 		return MessageAgentKillRequest, nil
 	case ListenerSocketConnectionReady:
 		return MessageListenerSocketConnectionReady, nil
+	case RelayRequestPacket:
+		return MessageRelayRequest, nil
+	case RelayResponsePacket:
+		return MessageRelayResponse, nil
+	case RelayNewConnectionPacket:
+		return MessageRelayNewConnection, nil
+	case RelayBridgeRequestPacket:
+		return MessageRelayBridgeRequest, nil
+	case RelayEventPacket:
+		return MessageRelayEvent, nil
+	case AgentReconnectRequestPacket:
+		return MessageAgentReconnectRequest, nil
+	case AgentReconnectResponsePacket:
+		return MessageAgentReconnectResponse, nil
 	default:
 		return 0, fmt.Errorf("payloadTypeFromInterface called for unknown payload type: %v", payload)
 	}
@@ -78,11 +94,15 @@ func (e *LigoloEncoder) Encode(payload interface{}) error {
 		return err
 	}
 
-	if err := msgpack.MarshalWrite(e.writer, payloadType); err != nil {
+	if e.encoder == nil {
+		e.encoder = msgpack.NewEncoder(e.writer)
+	}
+
+	if err := e.encoder.Encode(payloadType); err != nil {
 		return err
 	}
 
-	if err := msgpack.MarshalWrite(e.writer, payload); err != nil {
+	if err := e.encoder.Encode(payload); err != nil {
 		return err
 	}
 
