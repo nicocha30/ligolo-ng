@@ -18,7 +18,8 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
+    cryptorand "crypto/rand"
+    mathrand "math/rand" 
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
@@ -60,13 +61,67 @@ var (
 	ErrNotRunning     = errors.New("no tunnel started")
 )
 
+func init() {
+    // Seed the random number generator for port selection
+    mathrand.Seed(time.Now().UnixNano())
+}
+
 func genRandomUUID() string {
-	b := make([]byte, 8)
-	_, err := rand.Read(b)
-	if err != nil {
-		logrus.Fatal(err)
+    b := make([]byte, 8)
+    _, err := cryptorand.Read(b)  // Changed from rand.Read
+    if err != nil {
+        logrus.Fatal(err)
+    }
+    return hex.EncodeToString(b)
+}
+
+// Helper function to check if a port is in use on an agent
+func isPortInUse(agent *controller.LigoloAgent, port int) bool {
+	for _, listener := range agent.Listeners {
+		if listener != nil {
+			_, listenerPort, err := net.SplitHostPort(listener.ListenerAddr())
+			if err == nil && listenerPort == fmt.Sprintf("%d", port) {
+				return true
+			}
+		}
 	}
-	return hex.EncodeToString(b)
+	return false
+}
+
+// Smart port allocation using ephemeral range with fallback
+func findAvailablePort(agent *controller.LigoloAgent, preferredStart int) int {
+	// If a preferred start port was given, try it first
+	if preferredStart > 0 && !isPortInUse(agent, preferredStart) {
+		return preferredStart
+	}
+	
+	// Try random ephemeral ports (49152-60151) - looks like natural reverse connections
+	for attempts := 0; attempts < 50; attempts++ {
+		port := 49152 + mathrand.Intn(11000)
+		if !isPortInUse(agent, port) {
+			return port
+		}
+	}
+	
+	// Fallback: sequential search in backup range (45000-48999)
+	for port := 45000; port < 49000; port++ {
+		if !isPortInUse(agent, port) {
+			logrus.Debugf("Using fallback port %d (ephemeral range exhausted)", port)
+			return port
+		}
+	}
+	
+	// Fallback 2: try the 30000-34999 range
+	for port := 30000; port < 35000; port++ {
+		if !isPortInUse(agent, port) {
+			logrus.Warnf("Using last-resort port %d (all preferred ranges exhausted)", port)
+			return port
+		}
+	}
+	
+	// If we still can't find a port, there is another problem
+	logrus.Errorf("Could not find available port after extensive search")
+	return 30000 // Return something, but this will likely fail
 }
 
 func RegisterAgent(agent *controller.LigoloAgent) error {
@@ -74,6 +129,346 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 	defer AgentListMutex.Unlock()
 	var recovered bool
 
+	// FOOLPROOF PIVOT CHAIN DETECTION
+	remoteAddr := agent.Session.RemoteAddr().String()
+	remoteHost, remotePort, _ := net.SplitHostPort(remoteAddr)
+	
+	// Also get the LOCAL address (proxy side)
+	localAddr := agent.Session.LocalAddr().String()
+	localHost, localPort, _ := net.SplitHostPort(localAddr)
+	
+	logrus.Debugf("New agent connecting - Remote: %s:%s, Local (proxy): %s:%s", 
+		remoteHost, remotePort, localHost, localPort)
+	
+	// Strategy 1: Check if remoteHost matches an agent IP with a listener on remotePort
+	// This handles: Agent connects directly to another agent's listener
+	var parentAgent *controller.LigoloAgent
+	var parentAgentID int
+	var parentListener *proxy.LigoloListener
+	
+	for agentID, existingAgent := range AgentList {
+		if !existingAgent.Alive() {
+			continue
+		}
+		
+		// Build a map of all IPs this agent has
+		agentIPs := make(map[string]bool)
+		for _, ifaceInfo := range existingAgent.Network {
+			for _, address := range ifaceInfo.Addresses {
+				ip, _, err := net.ParseCIDR(address)
+				if err != nil {
+					continue
+				}
+				agentIPs[ip.String()] = true
+			}
+		}
+		
+		// Check if this agent owns the remote IP
+		if agentIPs[remoteHost] {
+			// Check if this agent has a listener on the remote port
+			for _, listener := range existingAgent.Listeners {
+				if listener == nil {
+					continue
+				}
+				
+				_, listenerPort, err := net.SplitHostPort(listener.ListenerAddr())
+				if err != nil {
+					continue
+				}
+				
+				if listenerPort == remotePort {
+					// EXACT MATCH: This agent owns this IP and has a listener on this port
+					parentAgent = existingAgent
+					parentAgentID = agentID
+					parentListener = listener
+					break
+				}
+			}
+		}
+		
+		if parentAgent != nil {
+			break
+		}
+	}
+	
+	// Strategy 2: If remoteHost is the proxy IP or localhost, check for listeners redirecting to proxy
+	// This handles: Agent connects through pivots that redirect back to proxy
+	if parentAgent == nil && (remoteHost == localHost || remoteHost == "127.0.0.1" || remoteHost == "::1") {
+		logrus.Debugf("Connection from proxy/localhost IP (%s), checking for redirect chains", remoteHost)
+		
+		// Find all listeners that could be in the chain
+		type listenerInfo struct {
+			agentID  int
+			agent    *controller.LigoloAgent
+			listener *proxy.LigoloListener
+		}
+		
+		// Build a map of "destination" -> "listener that redirects there"
+		redirectsTo := make(map[string]listenerInfo)
+		
+		for agentID, existingAgent := range AgentList {
+			if !existingAgent.Alive() {
+				continue
+			}
+			
+			// Get all IPs for this agent
+			agentIPs := []string{}
+			for _, ifaceInfo := range existingAgent.Network {
+				for _, address := range ifaceInfo.Addresses {
+					ip, _, err := net.ParseCIDR(address)
+					if err != nil {
+						continue
+					}
+					if !ip.IsLoopback() {
+						agentIPs = append(agentIPs, ip.String())
+					}
+				}
+			}
+			
+			for _, listener := range existingAgent.Listeners {
+				if listener == nil {
+					continue
+				}
+				
+				info := listenerInfo{
+					agentID:  agentID,
+					agent:    existingAgent,
+					listener: listener,
+				}
+				
+				// Map: what does this listener redirect TO?
+				redirectAddr := listener.RedirectAddr()
+				redirectsTo[redirectAddr] = info
+				
+				logrus.Debugf("Mapped listener: %s on %s -> redirects to %s", 
+					listener.ListenerAddr(), existingAgent.Name, redirectAddr)
+			}
+		}
+		
+		// Find listeners that redirect to the proxy's listening port
+		// The connection might show an ephemeral source port, but we care about
+		// where the listener is redirecting TO (the proxy's actual listening port)
+		proxyListenPort := localPort
+		
+		// Check all possible proxy addresses
+		var proxyTargets []string
+		proxyTargets = append(proxyTargets, fmt.Sprintf("%s:%s", localHost, proxyListenPort))
+		proxyTargets = append(proxyTargets, fmt.Sprintf("0.0.0.0:%s", proxyListenPort))
+		proxyTargets = append(proxyTargets, fmt.Sprintf("127.0.0.1:%s", proxyListenPort))
+		proxyTargets = append(proxyTargets, fmt.Sprintf(":::%s", proxyListenPort))
+		proxyTargets = append(proxyTargets, fmt.Sprintf("[::]:%s", proxyListenPort))
+		
+		// Find any listener redirecting to the proxy
+		var directParentInfo *listenerInfo
+		for _, target := range proxyTargets {
+			if info, ok := redirectsTo[target]; ok {
+				logrus.Debugf("Found listener on %s redirecting to proxy at %s", info.agent.Name, target)
+				directParentInfo = &info
+				break
+			}
+		}
+		
+		if directParentInfo != nil {
+			// Found the direct parent - now walk backwards to find the complete chain
+			var chain []listenerInfo
+			chain = append(chain, *directParentInfo)
+			visited := make(map[string]bool)
+			currentAgent := directParentInfo.agent
+			currentListener := directParentInfo.listener
+			
+			// Continue walking backwards from this listener
+			for {
+				listenerHost, listenerPort, err := net.SplitHostPort(currentListener.ListenerAddr())
+				if err != nil {
+					break
+				}
+				
+				// Get all IPs for the current agent
+				agentIPs := []string{}
+				for _, ifaceInfo := range currentAgent.Network {
+					for _, address := range ifaceInfo.Addresses {
+						ip, _, err := net.ParseCIDR(address)
+						if err != nil {
+							continue
+						}
+						if !ip.IsLoopback() {
+							agentIPs = append(agentIPs, ip.String())
+						}
+					}
+				}
+				
+				// Check if another listener redirects to this listener
+				found := false
+				var checkAddresses []string
+				
+				if listenerHost == "0.0.0.0" || listenerHost == "" {
+					// Wildcard - check all agent IPs
+					for _, ip := range agentIPs {
+						checkAddresses = append(checkAddresses, fmt.Sprintf("%s:%s", ip, listenerPort))
+					}
+				} else {
+					checkAddresses = append(checkAddresses, fmt.Sprintf("%s:%s", listenerHost, listenerPort))
+				}
+				
+				for _, addr := range checkAddresses {
+					if visited[addr] {
+						continue
+					}
+					visited[addr] = true
+					
+					if info, ok := redirectsTo[addr]; ok {
+						logrus.Debugf("Found listener on %s redirecting to %s", info.agent.Name, addr)
+						chain = append(chain, info)
+						currentAgent = info.agent
+						currentListener = info.listener
+						found = true
+						break
+					}
+				}
+				
+				if !found {
+					break
+				}
+				
+				if len(chain) > 10 {
+					logrus.Warnf("Redirect chain too long, stopping search")
+					break
+				}
+			}
+			
+			// The last element in chain is the direct parent (closest to the proxy)
+			if len(chain) > 0 {
+				directParent := chain[len(chain)-1]
+				parentAgent = directParent.agent
+				parentAgentID = directParent.agentID
+				parentListener = directParent.listener
+				
+				logrus.Debugf("Traced redirect chain (%d hops), direct parent: %s", 
+					len(chain), parentAgent.Name)
+			}
+		} else {
+			// Fallback: try the old method walking from the connection port
+			currentTarget := fmt.Sprintf("%s:%s", localHost, localPort)
+			var chain []listenerInfo
+			visited := make(map[string]bool)
+			
+			for {
+				if visited[currentTarget] {
+					logrus.Debugf("Cycle detected in redirect chain at %s", currentTarget)
+					break
+				}
+				visited[currentTarget] = true
+				
+				// Look for a listener that redirects TO currentTarget
+				if info, ok := redirectsTo[currentTarget]; ok {
+					logrus.Debugf("Found listener on %s (port %s) redirecting to %s", 
+						info.agent.Name, info.listener.ListenerAddr(), currentTarget)
+					chain = append(chain, info)
+					
+					// Now find where THIS listener is located (on which IPs)
+					// and continue walking backwards
+					listenerHost, listenerPort, err := net.SplitHostPort(info.listener.ListenerAddr())
+					if err != nil {
+						break
+					}
+					
+					// Get all IPs for this agent to find what might connect to this listener
+					agentIPs := []string{}
+					for _, ifaceInfo := range info.agent.Network {
+						for _, address := range ifaceInfo.Addresses {
+							ip, _, err := net.ParseCIDR(address)
+							if err != nil {
+								continue
+							}
+							if !ip.IsLoopback() {
+								agentIPs = append(agentIPs, ip.String())
+							}
+						}
+					}
+					
+					// Try each IP (the previous hop might connect to any of them)
+					found := false
+					if listenerHost == "0.0.0.0" || listenerHost == "" {
+						// Wildcard listener - try all IPs
+						for _, ip := range agentIPs {
+							nextTarget := fmt.Sprintf("%s:%s", ip, listenerPort)
+							// Check if something redirects to this address
+							if _, ok := redirectsTo[nextTarget]; ok {
+								currentTarget = nextTarget
+								found = true
+								logrus.Debugf("Walking back to %s", nextTarget)
+								break
+							}
+						}
+					} else {
+						// Specific IP
+						currentTarget = info.listener.ListenerAddr()
+						found = true
+					}
+					
+					if !found {
+						// No more listeners redirect to this one
+						break
+					}
+				} else {
+					// No more listeners in chain
+					logrus.Debugf("No listener found redirecting to %s", currentTarget)
+					break
+				}
+				
+				// Safety: prevent infinite loops
+				if len(chain) > 10 {
+					logrus.Warnf("Redirect chain too long, stopping search")
+					break
+				}
+			}
+			
+			// The last element in chain is the direct parent (closest to the proxy)
+			if len(chain) > 0 {
+				directParent := chain[len(chain)-1]
+				parentAgent = directParent.agent
+				parentAgentID = directParent.agentID
+				parentListener = directParent.listener
+				
+				logrus.Debugf("Traced redirect chain (%d hops), direct parent: %s", 
+					len(chain), parentAgent.Name)
+			}
+		}
+	}
+	
+	// Build pivot chain
+	if parentAgent != nil {
+		logrus.Infof("Pivot detected: %s connected through %s's listener %s", 
+			agent.Name, parentAgent.Name, parentListener.ListenerAddr())
+		
+		// Inherit parent's chain
+		agent.PivotChain = []controller.PivotHop{}
+		if len(parentAgent.PivotChain) > 0 {
+			agent.PivotChain = append(agent.PivotChain, parentAgent.PivotChain...)
+		}
+		
+		// Add parent as new hop
+		agent.PivotChain = append(agent.PivotChain, controller.PivotHop{
+			AgentID:      parentAgentID,
+			ListenerAddr: parentListener.ListenerAddr(),
+		})
+		
+		// Build and log complete path
+		chainParts := []string{"Proxy"}
+		for _, hop := range agent.PivotChain {
+			if hopAgent, ok := AgentList[hop.AgentID]; ok {
+				chainParts = append(chainParts, hopAgent.Name)
+			}
+		}
+		chainParts = append(chainParts, agent.Name)
+		
+		logrus.Infof("Pivot chain for %s: %d hops | Path: %s", 
+			agent.Name, len(agent.PivotChain), strings.Join(chainParts, " ← "))
+	} else {
+		logrus.Debugf("No pivot detected for %s (direct connection)", agent.Name)
+	}
+
+	// Check for agent recovery
 	for agentID, registeredAgents := range AgentList {
 		if agent.SessionID == registeredAgents.SessionID {
 			// Check if existing session is truly alive and functional
@@ -81,12 +476,9 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 			if registeredAgents.Session != nil {
 				select {
 				case <-registeredAgents.Session.CloseChan():
-					// Session is closed
 					logrus.Debugf("Existing session for %s is closed", agent.SessionID)
 				default:
-					// Session channel is not closed, verify it's actually working
 					if registeredAgents.Alive() {
-						// Try to open a test stream to verify functionality
 						testStream, err := registeredAgents.Session.Open()
 						if err != nil {
 							logrus.Debugf("Session appears alive but cannot open stream: %v", err)
@@ -99,58 +491,47 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 			}
 			
 			if sessionFunctional {
-				// Session is truly alive and working, reject duplicate
 				logrus.Infof("Agent %s already connected, rejecting duplicate from %s", agent.SessionID, agent.Session.RemoteAddr())
-				// Close the duplicate connection gracefully
 				if agent.Session != nil {
 					agent.Session.Close()
 				}
 				return fmt.Errorf("agent %s already connected", agent.SessionID)
 			}
 			
-			// Session is dead or non-functional, perform recovery
+			// Session is dead, perform recovery
 			logrus.Infof("Recovering agent: %s (ID: %d)", registeredAgents.Name, agentID)
 			recovered = true
 			
-			// Close old session if it exists
 			if registeredAgents.Session != nil {
 				registeredAgents.Session.Close()
 			}
 			
-			// Update to new session
 			registeredAgents.Session = agent.Session
+			registeredAgents.PivotChain = agent.PivotChain
 
-			// FIXED: Check if tunnel was running and clean up properly
 			savedInterface := registeredAgents.Interface
 			tunnelWasRunning := registeredAgents.Running
 			
-			// ALWAYS restore tunnel if an interface was previously configured
 			if savedInterface != "" {
 				logrus.Infof("Restoring tunnel for agent %s on interface %s", registeredAgents.Name, savedInterface)
 
-				// Stop the old tunnel if somehow still running
 				if tunnelWasRunning {
 					select {
 					case registeredAgents.CloseChan <- true:
 					default:
 					}
-					// Wait for cleanup
 					time.Sleep(500 * time.Millisecond)
 				}
 
-				// Reset running flag
 				registeredAgents.Running = false
 				
-				// CRITICAL: Clean up any stale interface state
 				if netinfo.InterfaceExist(savedInterface) {
 					logrus.Infof("Cleaning up stale interface %s...", savedInterface)
 					stun, err := netinfo.GetTunByName(savedInterface)
 					if err == nil {
-						// Get current routes from config
 						configState, err := config.GetInterfaceConfigState()
 						if err == nil {
 							if ifaceConfig, ok := configState[savedInterface]; ok {
-								// Delete existing routes
 								for _, ifcfg := range ifaceConfig.Routes {
 									if ifcfg.Active {
 										logrus.Debugf("Removing stale route %s", ifcfg.Destination)
@@ -161,7 +542,6 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 								}
 							}
 						}
-						// Destroy interface to release old fd
 						logrus.Debugf("Destroying stale interface %s...", savedInterface)
 						if err := stun.Destroy(); err != nil {
 							logrus.Warnf("Could not destroy interface: %v", err)
@@ -170,28 +550,24 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 					}
 				}
 				
-				// Recreate interface with fresh fd
 				logrus.Infof("Recreating interface %s...", savedInterface)
 				if err := netinfo.CreateTUN(savedInterface); err != nil {
 					logrus.Errorf("Could not recreate interface: %v", err)
 					return fmt.Errorf("failed to recreate interface: %v", err)
 				}
 
-				// Start fresh tunnel on the SAME interface
 				if err := StartTunnel(registeredAgents, savedInterface); err != nil {
 					logrus.Errorf("Failed to restore tunnel: %v", err)
 					return fmt.Errorf("failed to restore tunnel: %v", err)
 				}
 			}
 
-			// FIXED: Properly restore listeners by recreating them
 			var listenersToRestore []struct {
 				listenerAddr string
 				network      string
 				redirectAddr string
 			}
 
-			// First, collect listener info and stop old listeners
 			for _, listener := range registeredAgents.Listeners {
 				if listener != nil {
 					logrus.Infof("Collecting listener info for restoration: %s", listener.String())
@@ -204,33 +580,27 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 						network:      listener.Network(),
 						redirectAddr: listener.RedirectAddr(),
 					})
-					// Stop the old listener (this will close the proxy-side resources)
 					if err := listener.Stop(); err != nil {
 						logrus.Warnf("Failed to stop old listener: %v", err)
 					}
 				}
 			}
 
-			// Clear the old listeners array
 			registeredAgents.Listeners = []*proxy.LigoloListener{}
 
-			// Give agent time to clean up old port bindings
 			if len(listenersToRestore) > 0 {
 				time.Sleep(500 * time.Millisecond)
 			}
 
-			// Now recreate listeners on the agent side with the new session
 			for _, listenerInfo := range listenersToRestore {
 				logrus.Infof("Restoring listener: [%s] %s => %s", listenerInfo.network, listenerInfo.listenerAddr, listenerInfo.redirectAddr)
 				
-				// AddListener will create a new listener on the agent side
 				proxyListener, err := registeredAgents.AddListener(listenerInfo.listenerAddr, listenerInfo.network, listenerInfo.redirectAddr)
 				if err != nil {
 					logrus.Errorf("Failed to restore listener: %v", err)
 					continue
 				}
 				
-				// Start the relay for the new listener
 				go func(l *proxy.LigoloListener, a *controller.LigoloAgent) {
 					err := l.StartRelay()
 					if err != nil {
@@ -244,7 +614,7 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 		}
 	}
 
-	// New agent, not recovered
+	// New agent
 	if !recovered {
 		if config.Config.GetBool(fmt.Sprintf("agent.%s.autobind", agent.SessionID)) {
 			autobindInterface := config.Config.GetString(fmt.Sprintf("agent.%s.interface", agent.SessionID))
@@ -400,6 +770,7 @@ func Run() {
 	// AgentList contains all the connected agents
 	AgentList = make(map[int]*controller.LigoloAgent)
 
+	// session
 	App.AddCommand(&grumble.Command{
 		Name:  "session",
 		Help:  "Change the current relay agent",
@@ -448,6 +819,7 @@ func Run() {
 		},
 	})
 
+	// certificate_fingerprint
 	App.AddCommand(&grumble.Command{
 		Name:  "certificate_fingerprint",
 		Help:  "Show the current selfcert fingerprint",
@@ -465,6 +837,7 @@ func Run() {
 		},
 	})
 
+	// connect_agent
 	App.AddCommand(&grumble.Command{
 		Name:  "connect_agent",
 		Help:  "Attempt to connect to a bind agent",
@@ -515,6 +888,7 @@ func Run() {
 		},
 	})
 
+	// tunnel_start
 	App.AddCommand(&grumble.Command{
 		Name:      "tunnel_start",
 		Help:      "Start relaying connection to the current agent",
@@ -553,6 +927,7 @@ func Run() {
 		},
 	})
 
+	// tunnel_list
 	App.AddCommand(&grumble.Command{
 		Name:      "tunnel_list",
 		Help:      "List active tunnels and sessions",
@@ -563,7 +938,7 @@ func Run() {
 			t := table.NewWriter()
 			t.SetStyle(table.StyleLight)
 			t.SetTitle("Active sessions and tunnels")
-			t.AppendHeader(table.Row{"#", "Agent", "Interface", "Status"})
+			t.AppendHeader(table.Row{"#", "Agent", "Interface", "Pivot Chain", "Status"})
 
 			AgentListMutex.Lock()
 			for id, agent := range AgentList {
@@ -573,7 +948,16 @@ func Run() {
 				} else {
 					status = text.Colors{text.FgRed}.Sprintf("Offline (Awaiting recovery)")
 				}
-				t.AppendRow(table.Row{id, agent.String(), agent.Interface, status})
+				
+				// Build pivot chain display
+				var pivotChainStr string
+				if len(agent.PivotChain) == 0 {
+					pivotChainStr = text.Colors{text.FgCyan}.Sprintf("Direct")
+				} else {
+					pivotChainStr = text.Colors{text.FgYellow}.Sprintf("%d hops", len(agent.PivotChain))
+				}
+				
+				t.AppendRow(table.Row{id, agent.String(), agent.Interface, pivotChainStr, status})
 			}
 			AgentListMutex.Unlock()
 			App.Println(t.Render())
@@ -581,6 +965,7 @@ func Run() {
 		},
 	})
 
+	// tunnel_stop
 	App.AddCommand(&grumble.Command{
 		Name:      "tunnel_stop",
 		Help:      "Stop the tunnel",
@@ -612,7 +997,8 @@ func Run() {
 		},
 	})
 
-App.AddCommand(&grumble.Command{
+	// ifconfig
+	App.AddCommand(&grumble.Command{
 		Name:  "ifconfig",
 		Help:  "Show agent interfaces",
 		Usage: "ifconfig",
@@ -654,6 +1040,7 @@ App.AddCommand(&grumble.Command{
 		},
 	})
 
+	// listener_list
 	App.AddCommand(&grumble.Command{
 		Name:      "listener_list",
 		Help:      "List currently running listeners",
@@ -682,6 +1069,7 @@ App.AddCommand(&grumble.Command{
 		},
 	})
 
+	// listener_stop
 	App.AddCommand(&grumble.Command{
 		Name:      "listener_stop",
 		Help:      "Stop a listener",
@@ -745,6 +1133,7 @@ App.AddCommand(&grumble.Command{
 		},
 	})
 
+	// listener_add
 	App.AddCommand(&grumble.Command{
 		Name:      "listener_add",
 		Help:      "Listen on the agent and redirect connections to the desired address",
@@ -815,6 +1204,318 @@ App.AddCommand(&grumble.Command{
 		},
 	})
 
+	// backhome
+	App.AddCommand(&grumble.Command{
+		Name:      "backhome",
+		Help:      "Create a reverse path through pivot chain back to proxy/attacker",
+		Usage:     "backhome --to [proxy|<local_port>] [--port <remote_port_to_open>] [--tcp|--udp]",
+		HelpGroup: "Listeners",
+		Flags: func(f *grumble.Flags) {
+			f.StringL("to", "proxy", "Destination: 'proxy' or specific port number on attacker host")
+			f.IntL("port", 0, "Port to open on the remote agent (auto-assigned if not specified)")
+			f.BoolL("tcp", false, "Use TCP listener (default)")
+			f.BoolL("udp", false, "Use UDP listener")
+		},
+		Run: func(c *grumble.Context) error {
+			if _, ok := AgentList[CurrentAgentID]; !ok {
+				return ErrInvalidAgent
+			}
+			CurrentAgent := AgentList[CurrentAgentID]
+			if CurrentAgent.Session == nil {
+				return errors.New("please select an agent using the session command")
+			}
+
+			// Determine protocol
+			var netProto string
+			if c.Flags.Bool("tcp") && c.Flags.Bool("udp") {
+				return errors.New("choose TCP or UDP, not both")
+			}
+			if c.Flags.Bool("udp") {
+				netProto = "udp"
+			} else {
+				netProto = "tcp" // Default to TCP
+			}
+
+			// Check if this agent has a pivot chain, if not, act as a simple listener_add
+			if len(CurrentAgent.PivotChain) == 0 {
+				// Determine the port to open on the agent
+				remotePort := c.Flags.Int("port")
+				if remotePort == 0 {
+					remotePort = findAvailablePort(CurrentAgent, 0)
+					logrus.Debugf("Auto-assigned port %d on agent", remotePort)
+				}
+				
+				// Determine target destination
+				toFlag := c.Flags.String("to")
+				var finalDestination string
+				
+				if toFlag == "proxy" {
+					proxyHost, proxyPort, err := net.SplitHostPort(CurrentAgent.Session.LocalAddr().String())
+					if err != nil {
+						return fmt.Errorf("failed to determine proxy address: %v", err)
+					}
+					finalDestination = fmt.Sprintf("%s:%s", proxyHost, proxyPort)
+				} else {
+					proxyHost, _, err := net.SplitHostPort(CurrentAgent.Session.LocalAddr().String())
+					if err != nil {
+						return fmt.Errorf("failed to determine proxy address: %v", err)
+					}
+					finalDestination = fmt.Sprintf("%s:%s", proxyHost, toFlag)
+				}
+				
+				// Create the listener
+				listenAddr := fmt.Sprintf("0.0.0.0:%d", remotePort)
+				proxyListener, err := CurrentAgent.AddListener(listenAddr, netProto, finalDestination)
+				if err != nil {
+					return fmt.Errorf("failed to create listener: %v", err)
+				}
+				
+				go func(l *proxy.LigoloListener, a *controller.LigoloAgent) {
+					err := l.StartRelay()
+					if err != nil {
+						logrus.WithFields(logrus.Fields{
+							"listener": l.String(), 
+							"agent":    a.Name, 
+							"id":       a.SessionID,
+						}).Warnf("Backhome listener relay ended: %v", err)
+					}
+				}(proxyListener, CurrentAgent)
+				
+				// Show available NICs with their IPs
+				var targetIPs []string
+				for _, ifaceInfo := range CurrentAgent.Network {
+					for _, address := range ifaceInfo.Addresses {
+						ip, _, err := net.ParseCIDR(address)
+						if err != nil {
+							continue
+						}
+						if !ip.IsLoopback() && ip.To4() != nil {
+							targetIPs = append(targetIPs, fmt.Sprintf("%s:%d", ip.String(), remotePort))
+						}
+					}
+				}
+				
+				protoStr := text.Colors{text.FgBlue}.Sprintf("[%s]", strings.ToUpper(netProto))
+				targetsStr := text.Colors{text.FgCyan}.Sprint(strings.Join(targetIPs, " | "))
+				destStr := text.Colors{text.FgMagenta}.Sprint(finalDestination)
+				agentStr := text.Colors{text.FgGreen}.Sprint(CurrentAgent.Name)
+				portStr := text.Colors{text.FgYellow}.Sprintf(":%d", remotePort)
+				
+				logrus.Info(text.Colors{text.FgGreen}.Sprintf("✓ Direct backhome %s: %s%s → %s", protoStr, agentStr, portStr, destStr))
+				logrus.Infof("  Connect to: %s", targetsStr)
+				
+				return nil
+			}
+
+			// Determine target destination
+			toFlag := c.Flags.String("to")
+			var finalDestination string
+			
+			if toFlag == "proxy" {
+				firstHop := CurrentAgent.PivotChain[0]
+				firstAgent, ok := AgentList[firstHop.AgentID]
+				if !ok {
+					return fmt.Errorf("first pivot agent (ID: %d) not found", firstHop.AgentID)
+				}
+				
+				proxyHost, proxyPort, err := net.SplitHostPort(firstAgent.Session.LocalAddr().String())
+				if err != nil {
+					return fmt.Errorf("failed to determine proxy address: %v", err)
+				}
+				finalDestination = fmt.Sprintf("%s:%s", proxyHost, proxyPort)
+			} else {
+				firstHop := CurrentAgent.PivotChain[0]
+				firstAgent, ok := AgentList[firstHop.AgentID]
+				if !ok {
+					return fmt.Errorf("first pivot agent (ID: %d) not found", firstHop.AgentID)
+				}
+				
+				proxyHost, _, err := net.SplitHostPort(firstAgent.Session.LocalAddr().String())
+				if err != nil {
+					return fmt.Errorf("failed to determine proxy address: %v", err)
+				}
+				finalDestination = fmt.Sprintf("%s:%s", proxyHost, toFlag)
+			}
+
+			// Determine the port to open on the target agent
+			remotePort := c.Flags.Int("port")
+			if remotePort == 0 {
+				remotePort = findAvailablePort(CurrentAgent, 0)
+				logrus.Debugf("Auto-assigned port %d on target agent", remotePort)
+			}
+
+			// Build the reverse chain
+			currentDestination := finalDestination
+			var createdListeners []struct {
+				agentID    int
+				listenerID int32
+				port       int
+			}
+
+			// Start from the end of the pivot chain and work backwards
+			for i := len(CurrentAgent.PivotChain) - 1; i >= 0; i-- {
+				hop := CurrentAgent.PivotChain[i]
+				intermediateAgent, ok := AgentList[hop.AgentID]
+				if !ok {
+					for _, listener := range createdListeners {
+						if agent, ok := AgentList[listener.agentID]; ok {
+							agent.DeleteListener(int(listener.listenerID))
+						}
+					}
+					return fmt.Errorf("intermediate agent %d not found in pivot chain", hop.AgentID)
+				}
+
+				if !intermediateAgent.Alive() {
+					for _, listener := range createdListeners {
+						if agent, ok := AgentList[listener.agentID]; ok {
+							agent.DeleteListener(int(listener.listenerID))
+						}
+					}
+					return fmt.Errorf("intermediate agent %s (ID: %d) is offline", intermediateAgent.Name, hop.AgentID)
+				}
+
+				// Use smart port allocation - find an available ephemeral port
+				listenPort := findAvailablePort(intermediateAgent, 0)
+				listenAddr := fmt.Sprintf("0.0.0.0:%d", listenPort)
+
+				logrus.Debugf("Creating intermediate listener on %s: %s -> %s (%s)", 
+					intermediateAgent.Name, listenAddr, currentDestination, netProto)
+
+				proxyListener, err := intermediateAgent.AddListener(listenAddr, netProto, currentDestination)
+				if err != nil {
+					for _, listener := range createdListeners {
+						if agent, ok := AgentList[listener.agentID]; ok {
+							agent.DeleteListener(int(listener.listenerID))
+						}
+					}
+					return fmt.Errorf("failed to create listener on %s: %v", intermediateAgent.Name, err)
+				}
+
+				createdListeners = append(createdListeners, struct {
+					agentID    int
+					listenerID int32
+					port       int
+				}{hop.AgentID, proxyListener.ID, listenPort})
+
+				go func(l *proxy.LigoloListener, a *controller.LigoloAgent) {
+					err := l.StartRelay()
+					if err != nil {
+						logrus.WithFields(logrus.Fields{
+							"listener": l.String(), 
+							"agent":    a.Name, 
+							"id":       a.SessionID,
+						}).Warnf("Backhome listener relay ended: %v", err)
+					}
+				}(proxyListener, intermediateAgent)
+
+				// Find the IP to use for the next hop
+				var nextHopIP string
+				for _, ifaceInfo := range intermediateAgent.Network {
+					for _, address := range ifaceInfo.Addresses {
+						ip, _, err := net.ParseCIDR(address)
+						if err != nil {
+							continue
+						}
+						if !ip.IsLoopback() && ip.To4() != nil {
+							nextHopIP = ip.String()
+							break
+						}
+					}
+					if nextHopIP != "" {
+						break
+					}
+				}
+
+				if nextHopIP == "" {
+					host, _, err := net.SplitHostPort(intermediateAgent.Session.RemoteAddr().String())
+					if err == nil {
+						nextHopIP = host
+					} else {
+						nextHopIP = "127.0.0.1"
+						logrus.Warnf("Could not determine IP for %s, using localhost", intermediateAgent.Name)
+					}
+				}
+
+				currentDestination = fmt.Sprintf("%s:%d", nextHopIP, listenPort)
+			}
+
+			// Finally, create a listener on the target agent
+			targetListenAddr := fmt.Sprintf("0.0.0.0:%d", remotePort)
+
+			logrus.Debugf("Creating final listener on %s: %s -> %s (%s)", 
+				CurrentAgent.Name, targetListenAddr, currentDestination, netProto)
+
+			proxyListener, err := CurrentAgent.AddListener(targetListenAddr, netProto, currentDestination)
+			if err != nil {
+				for _, listener := range createdListeners {
+					if agent, ok := AgentList[listener.agentID]; ok {
+						agent.DeleteListener(int(listener.listenerID))
+					}
+				}
+				return fmt.Errorf("failed to create listener on target agent: %v", err)
+			}
+
+			go func(l *proxy.LigoloListener, a *controller.LigoloAgent) {
+				err := l.StartRelay()
+				if err != nil {
+					logrus.WithFields(logrus.Fields{
+						"listener": l.String(), 
+						"agent":    a.Name, 
+						"id":       a.SessionID,
+					}).Warnf("Backhome listener relay ended: %v", err)
+				}
+			}(proxyListener, CurrentAgent)
+
+			// Show available NICs with their IPs
+			var targetIPs []string
+			for _, ifaceInfo := range CurrentAgent.Network {
+				for _, address := range ifaceInfo.Addresses {
+					ip, _, err := net.ParseCIDR(address)
+					if err != nil {
+						continue
+					}
+					if !ip.IsLoopback() && ip.To4() != nil {
+						targetIPs = append(targetIPs, fmt.Sprintf("%s:%d", ip.String(), remotePort))
+					}
+				}
+			}
+			
+			// Build compact chain visualization with ports
+			var chainParts []string
+			chainParts = append(chainParts, text.Colors{text.FgGreen}.Sprintf("%s:%d", CurrentAgent.Name, remotePort))
+			
+			for i := len(CurrentAgent.PivotChain) - 1; i >= 0; i-- {
+				hop := CurrentAgent.PivotChain[i]
+				if agent, ok := AgentList[hop.AgentID]; ok {
+					// Find the port for this hop
+					hopPort := 0
+					for _, listener := range createdListeners {
+						if listener.agentID == hop.AgentID {
+							hopPort = listener.port
+							break
+						}
+					}
+					if hopPort > 0 {
+						chainParts = append(chainParts, text.Colors{text.FgYellow}.Sprintf("%s:%d", agent.Name, hopPort))
+					} else {
+						chainParts = append(chainParts, text.Colors{text.FgYellow}.Sprint(agent.Name))
+					}
+				}
+			}
+			chainParts = append(chainParts, text.Colors{text.FgMagenta}.Sprint(finalDestination))
+			
+			protoStr := text.Colors{text.FgBlue}.Sprintf("[%s]", strings.ToUpper(netProto))
+			targetsStr := text.Colors{text.FgCyan}.Sprint(strings.Join(targetIPs, " | "))
+			chainStr := strings.Join(chainParts, " → ")
+			
+			logrus.Info(text.Colors{text.FgGreen}.Sprintf("✓ Backhome %s (%d hops): %s", protoStr, len(CurrentAgent.PivotChain), chainStr))
+			logrus.Infof("  Connect to: %s", targetsStr)
+
+			return nil
+		},
+	})
+
+	//kill
 	App.AddCommand(&grumble.Command{
 		Name:    "kill",
 		Help:    "Kill the current agent",
@@ -831,4 +1532,46 @@ App.AddCommand(&grumble.Command{
 			return nil
 		},
 	})
+
+	// pivot_show
+	App.AddCommand(&grumble.Command{
+		Name:      "pivot_show",
+		Help:      "Show detailed pivot chain for the current agent",
+		Usage:     "pivot_show",
+		HelpGroup: "Tunneling",
+		Aliases:   []string{"show_pivot"},
+		Run: func(c *grumble.Context) error {
+			if _, ok := AgentList[CurrentAgentID]; !ok {
+				return ErrInvalidAgent
+			}
+			CurrentAgent := AgentList[CurrentAgentID]
+			if CurrentAgent.Session == nil {
+				return ErrInvalidAgent
+			}
+
+			if len(CurrentAgent.PivotChain) == 0 {
+				logrus.Info(text.Colors{text.FgCyan}.Sprint("Direct connection to proxy (no pivot chain)"))
+				return nil
+			}
+
+			chainParts := []string{text.Colors{text.FgMagenta}.Sprint("Proxy")}
+			
+			for _, hop := range CurrentAgent.PivotChain {
+				if agent, ok := AgentList[hop.AgentID]; ok {
+					chainParts = append(chainParts, text.Colors{text.FgYellow}.Sprint(agent.Name))
+				} else {
+					chainParts = append(chainParts, text.Colors{text.FgRed}.Sprintf("Agent#%d[OFFLINE]", hop.AgentID))
+				}
+			}
+			
+			chainParts = append(chainParts, text.Colors{text.FgGreen}.Sprintf("%s (YOU)", CurrentAgent.Name))
+			
+			chainStr := strings.Join(chainParts, " ← ")
+			
+			logrus.Info(text.Colors{text.FgCyan}.Sprintf("Pivot chain (%d hops): %s", len(CurrentAgent.PivotChain), chainStr))
+
+			return nil
+		},
+	})
+
 }

@@ -26,6 +26,11 @@ import (
 	"github.com/nicocha30/ligolo-ng/pkg/proxy"
 )
 
+type PivotHop struct {
+	AgentID      int
+	ListenerAddr string
+}
+
 type LigoloAgent struct {
 	Name      string
 	Network   []protocol.NetInterface
@@ -35,6 +40,7 @@ type LigoloAgent struct {
 	Interface string
 	Running   bool
 	Listeners []*proxy.LigoloListener
+	PivotChain []PivotHop
 }
 
 func (la *LigoloAgent) Alive() bool {
