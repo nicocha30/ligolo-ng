@@ -45,7 +45,12 @@ var sessionID string
 func init() {
 	listenerConntrack = make(map[int32]net.Conn)
 	listenerMap = make(map[int32]interface{})
-	sessionID = hex.EncodeToString(uuid.NodeID())
+	// Allow overriding SessionID for testing multiple agents on the same host
+	if envID := os.Getenv("LIGOLO_SESSION_ID"); envID != "" {
+		sessionID = envID
+	} else {
+		sessionID = hex.EncodeToString(uuid.NodeID())
+	}
 }
 
 // Listener is the base class implementing listener sockets for Ligolo
@@ -184,9 +189,10 @@ func HandleConn(conn net.Conn) {
 			return
 		}
 		infoResponse := protocol.InfoReplyPacket{
-			Name:       fmt.Sprintf("%s@%s", username, hostname),
-			Interfaces: protocol.NewNetInterfaces(netifaces),
-			SessionID:  sessionID,
+			Name:         fmt.Sprintf("%s@%s", username, hostname),
+			Interfaces:   protocol.NewNetInterfaces(netifaces),
+			SessionID:    sessionID,
+			RelayCapable: true,
 		}
 
 		if err := encoder.Encode(infoResponse); err != nil {
@@ -358,6 +364,36 @@ func HandleConn(conn net.Conn) {
 
 	case *protocol.AgentKillRequestPacket:
 		os.Exit(0)
+
+	case *protocol.RelayRequestPacket:
+		relayRequest := e.Payload.(*protocol.RelayRequestPacket)
+		encoder := protocol.NewEncoder(conn)
+
+		logrus.Infof("Received relay request for %s", relayRequest.ListenAddr)
+
+		// StartRelayListener sends the RelayResponsePacket itself (with cert fingerprint)
+		if err := StartRelayListener(relayRequest.ListenAddr, conn); err != nil {
+			logrus.Errorf("Relay start failed: %v", err)
+			encoder.Encode(protocol.RelayResponsePacket{
+				Err:       true,
+				ErrString: err.Error(),
+			})
+			return
+		}
+
+		// Keep the control stream open — it's used for RelayNewConnection notifications.
+		// Block until the connection is closed by the proxy.
+		buf := make([]byte, 1)
+		conn.Read(buf)
+
+		// Control stream closed, stop relay
+		StopRelayListener()
+
+	case *protocol.RelayBridgeRequestPacket:
+		bridgeRequest := e.Payload.(*protocol.RelayBridgeRequestPacket)
+		logrus.Debugf("Received relay bridge request for connection ID %d", bridgeRequest.ConnectionID)
+
+		HandleRelayBridge(conn, bridgeRequest.ConnectionID)
 
 	}
 }

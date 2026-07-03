@@ -22,6 +22,8 @@ import (
 	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 	"github.com/nicocha30/ligolo-ng/cmd/proxy/config"
+	"github.com/nicocha30/ligolo-ng/pkg/controller"
+	"github.com/nicocha30/ligolo-ng/pkg/proxy"
 	"github.com/nicocha30/ligolo-ng/pkg/proxy/netinfo"
 	"github.com/nicocha30/ligolo-ng/pkg/tlsutils"
 	"github.com/nicocha30/ligolo-ng/web"
@@ -411,6 +413,81 @@ func StartLigoloApi() {
 			CurrentAgent.CloseChan <- true
 			CurrentAgent.Running = false
 			c.JSON(http.StatusOK, gin.H{"message": "tunnel stopping"})
+		})
+
+		apiv1.POST("/relay/:id", func(c *gin.Context) {
+			type RelayRequest struct {
+				ListenAddr string
+			}
+			var relayReq RelayRequest
+			agentParam := c.Param("id")
+			agentId, err := strconv.Atoi(agentParam)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			if err := c.ShouldBindJSON(&relayReq); err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			AgentListMutex.Lock()
+			agent, ok := AgentList[agentId]
+			AgentListMutex.Unlock()
+			if !ok {
+				c.JSON(http.StatusNotFound, gin.H{"error": "invalid agent"})
+				return
+			}
+			if !agent.RelayCapable {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "agent does not support relay mode"})
+				return
+			}
+			fingerprint, err := agent.StartRelay(relayReq.ListenAddr)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			// Start notification handler
+			go agent.HandleRelayNotifications(ChainMgr, func(a *controller.LigoloAgent) error {
+				logrus.WithFields(logrus.Fields{"name": a.Name, "session": a.SessionID, "via": agent.Name}).Info("Downstream agent connected via relay")
+				return RegisterAgent(a)
+			})
+			c.JSON(http.StatusOK, gin.H{"message": "relay started", "fingerprint": fingerprint})
+		})
+
+		apiv1.DELETE("/relay/:id", func(c *gin.Context) {
+			agentParam := c.Param("id")
+			agentId, err := strconv.Atoi(agentParam)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, inputError)
+				return
+			}
+			AgentListMutex.Lock()
+			agent, ok := AgentList[agentId]
+			AgentListMutex.Unlock()
+			if !ok {
+				c.JSON(http.StatusNotFound, gin.H{"error": "invalid agent"})
+				return
+			}
+			if err := agent.StopRelay(); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"message": "relay stopped"})
+		})
+
+		apiv1.GET("/chains", func(c *gin.Context) {
+			AgentListMutex.Lock()
+			var agents []proxy.AgentInfo
+			for _, agent := range AgentList {
+				agents = append(agents, proxy.AgentInfo{
+					Name:        agent.Name,
+					SessionID:   agent.SessionID,
+					RelayActive: agent.RelayActive,
+					Alive:       agent.Alive(),
+				})
+			}
+			AgentListMutex.Unlock()
+			c.JSON(http.StatusOK, gin.H{"topology": ChainMgr.RenderTree(agents)})
 		})
 
 		apiv1.POST("/tunnel/:id", func(c *gin.Context) {

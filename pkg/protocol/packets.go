@@ -44,6 +44,10 @@ const (
 	MessageListenerCloseResponse
 	MessageAgentKillRequest
 	MessageListenerSocketConnectionReady
+	MessageRelayRequest
+	MessageRelayResponse
+	MessageRelayNewConnection
+	MessageRelayBridgeRequest
 )
 
 const (
@@ -62,9 +66,10 @@ type InfoRequestPacket struct {
 
 // InfoReplyPacket contains the Name of the agent and the network interfaces configuration
 type InfoReplyPacket struct {
-	Name       string
-	Interfaces []NetInterface
-	SessionID  string
+	Name         string
+	Interfaces   []NetInterface
+	SessionID    string
+	RelayCapable bool
 }
 
 // ListenerSockRequestPacket is used by the proxy when relaying a listener socket
@@ -202,3 +207,26 @@ type HostPingResponsePacket struct {
 
 // AgentKillRequestPacket is sent by the proxy to terminate an agent
 type AgentKillRequestPacket struct{}
+
+// RelayRequestPacket is sent by the proxy to instruct an agent to start a relay listener
+type RelayRequestPacket struct {
+	ListenAddr string
+}
+
+// RelayResponsePacket is the response to RelayRequestPacket
+type RelayResponsePacket struct {
+	Err             bool
+	ErrString       string
+	CertFingerprint string
+}
+
+// RelayNewConnectionPacket is sent by the agent on the relay control stream when a downstream agent connects
+type RelayNewConnectionPacket struct {
+	ConnectionID int32
+	RemoteAddr   string
+}
+
+// RelayBridgeRequestPacket is sent by the proxy to the agent to bridge a yamux stream to a pending downstream connection
+type RelayBridgeRequestPacket struct {
+	ConnectionID int32
+}

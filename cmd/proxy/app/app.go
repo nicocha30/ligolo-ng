@@ -47,6 +47,7 @@ import (
 var AgentList map[int]*controller.LigoloAgent
 var AgentListMutex sync.Mutex
 var ProxyController *controller.Controller
+var ChainMgr = proxy.NewChainManager()
 
 // CurrentAgentID points to the selected agent in the UI (when running session)
 var CurrentAgentID int
@@ -97,7 +98,7 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 					}
 				}
 			}
-			
+
 			if sessionFunctional {
 				// Session is truly alive and working, reject duplicate
 				logrus.Infof("Agent %s already connected, rejecting duplicate from %s", agent.SessionID, agent.Session.RemoteAddr())
@@ -107,23 +108,23 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 				}
 				return fmt.Errorf("agent %s already connected", agent.SessionID)
 			}
-			
+
 			// Session is dead or non-functional, perform recovery
 			logrus.Infof("Recovering agent: %s (ID: %d)", registeredAgents.Name, agentID)
 			recovered = true
-			
+
 			// Close old session if it exists
 			if registeredAgents.Session != nil {
 				registeredAgents.Session.Close()
 			}
-			
+
 			// Update to new session
 			registeredAgents.Session = agent.Session
 
 			// FIXED: Check if tunnel was running and clean up properly
 			savedInterface := registeredAgents.Interface
 			tunnelWasRunning := registeredAgents.Running
-			
+
 			// ALWAYS restore tunnel if an interface was previously configured
 			if savedInterface != "" {
 				logrus.Infof("Restoring tunnel for agent %s on interface %s", registeredAgents.Name, savedInterface)
@@ -140,7 +141,7 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 
 				// Reset running flag
 				registeredAgents.Running = false
-				
+
 				// CRITICAL: Clean up any stale interface state
 				if netinfo.InterfaceExist(savedInterface) {
 					logrus.Infof("Cleaning up stale interface %s...", savedInterface)
@@ -169,7 +170,7 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 						time.Sleep(200 * time.Millisecond)
 					}
 				}
-				
+
 				// Recreate interface with fresh fd
 				logrus.Infof("Recreating interface %s...", savedInterface)
 				if err := netinfo.CreateTUN(savedInterface); err != nil {
@@ -222,14 +223,14 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 			// Now recreate listeners on the agent side with the new session
 			for _, listenerInfo := range listenersToRestore {
 				logrus.Infof("Restoring listener: [%s] %s => %s", listenerInfo.network, listenerInfo.listenerAddr, listenerInfo.redirectAddr)
-				
+
 				// AddListener will create a new listener on the agent side
 				proxyListener, err := registeredAgents.AddListener(listenerInfo.listenerAddr, listenerInfo.network, listenerInfo.redirectAddr)
 				if err != nil {
 					logrus.Errorf("Failed to restore listener: %v", err)
 					continue
 				}
-				
+
 				// Start the relay for the new listener
 				go func(l *proxy.LigoloListener, a *controller.LigoloAgent) {
 					err := l.StartRelay()
@@ -237,9 +238,39 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 						logrus.WithFields(logrus.Fields{"listener": l.String(), "agent": a.Name, "id": a.SessionID}).Warnf("Listener relay ended: %v", err)
 					}
 				}(proxyListener, registeredAgents)
-				
+
 				logrus.Infof("Listener restored successfully: %s", proxyListener.String())
 			}
+
+			// Restore relay if it was previously active
+			if registeredAgents.RelayActive {
+				savedRelayAddr := registeredAgents.RelayListenAddr
+				// Reset relay state before restarting
+				registeredAgents.RelayActive = false
+				registeredAgents.RelayControl = nil
+
+				logrus.Infof("Restoring relay on agent %s at %s", registeredAgents.Name, savedRelayAddr)
+				fingerprint, err := registeredAgents.StartRelay(savedRelayAddr)
+				if err != nil {
+					logrus.Errorf("Failed to restore relay: %v", err)
+				} else {
+					logrus.Infof("Relay restored (fingerprint: %s). Downstream agents can reconnect.", fingerprint)
+					go registeredAgents.HandleRelayNotifications(ChainMgr, func(a *controller.LigoloAgent) error {
+						logrus.WithFields(logrus.Fields{
+							"name":    a.Name,
+							"session": a.SessionID,
+							"via":     registeredAgents.Name,
+						}).Info("Downstream agent reconnected via relay")
+						return RegisterAgent(a)
+					})
+				}
+			}
+
+			// Preserve parent agent ID for recovered downstream agents
+			if agent.ParentAgentID != "" {
+				registeredAgents.ParentAgentID = agent.ParentAgentID
+			}
+
 			return nil
 		}
 	}
@@ -254,7 +285,7 @@ func RegisterAgent(agent *controller.LigoloAgent) error {
 			}
 		}
 	}
-	
+
 	AgentCounter++
 	AgentList[AgentCounter] = agent
 	return nil
@@ -265,9 +296,9 @@ func StartTunnel(agent *controller.LigoloAgent, tunName string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	interfaceExists := netinfo.InterfaceExist(tunName)
-	
+
 	// Create interface if needed
 	if _, ok := configState[tunName]; ok {
 		if runtime.GOOS == "linux" && !interfaceExists {
@@ -320,7 +351,7 @@ func StartTunnel(agent *controller.LigoloAgent, tunName string) error {
 	agent.Running = true
 
 	ctx, cancelTunnel := context.WithCancel(context.Background())
-	
+
 	go ligoloStack.HandleSession(agent.Session, ctx)
 
 	// Watchdog
@@ -331,7 +362,7 @@ func StartTunnel(agent *controller.LigoloAgent, tunName string) error {
 				logrus.Infof("Closing tunnel to %s (%s)...", agent.Name, agent.SessionID)
 				cancelTunnel()
 				agent.Running = false
-				
+
 				// Clean up routes on user stop
 				if netinfo.InterfaceExist(agent.Interface) {
 					tun, err := netinfo.GetTunByName(agent.Interface)
@@ -348,14 +379,14 @@ func StartTunnel(agent *controller.LigoloAgent, tunName string) error {
 					}
 				}
 				return
-				
+
 			case <-agent.Session.CloseChan():
 				logrus.Warnf("Lost tunnel connection with agent %s (%s)!", agent.Name, agent.SessionID)
-				
+
 				// FIXED: Properly clean up the old tunnel when agent drops
 				agent.Running = false
 				cancelTunnel()
-				
+
 				// CRITICAL FIX: Remove routes from the stale interface
 				// These routes point to the old (now closed) TUN fd
 				if netinfo.InterfaceExist(agent.Interface) {
@@ -380,7 +411,7 @@ func StartTunnel(agent *controller.LigoloAgent, tunName string) error {
 						logrus.Warnf("Could not destroy interface: %v", err)
 					}
 				}
-				
+
 				if currentAgent, ok := AgentList[CurrentAgentID]; ok {
 					if currentAgent.SessionID == agent.SessionID {
 						App.SetDefaultPrompt()
@@ -563,7 +594,7 @@ func Run() {
 			t := table.NewWriter()
 			t.SetStyle(table.StyleLight)
 			t.SetTitle("Active sessions and tunnels")
-			t.AppendHeader(table.Row{"#", "Agent", "Interface", "Status"})
+			t.AppendHeader(table.Row{"#", "Agent", "Interface", "Via", "Status"})
 
 			AgentListMutex.Lock()
 			for id, agent := range AgentList {
@@ -573,7 +604,17 @@ func Run() {
 				} else {
 					status = text.Colors{text.FgRed}.Sprintf("Offline (Awaiting recovery)")
 				}
-				t.AppendRow(table.Row{id, agent.String(), agent.Interface, status})
+				via := "(direct)"
+				if agent.ParentAgentID != "" {
+					// Find parent agent name
+					for _, a := range AgentList {
+						if a.SessionID == agent.ParentAgentID {
+							via = fmt.Sprintf("via %s", a.Name)
+							break
+						}
+					}
+				}
+				t.AppendRow(table.Row{id, agent.String(), agent.Interface, via, status})
 			}
 			AgentListMutex.Unlock()
 			App.Println(t.Render())
@@ -612,7 +653,7 @@ func Run() {
 		},
 	})
 
-App.AddCommand(&grumble.Command{
+	App.AddCommand(&grumble.Command{
 		Name:  "ifconfig",
 		Help:  "Show agent interfaces",
 		Usage: "ifconfig",
@@ -828,6 +869,100 @@ App.AddCommand(&grumble.Command{
 			if ask("Are you sure to kill the current agent?") {
 				return currentAgent.Kill()
 			}
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
+		Name:      "relay_start",
+		Help:      "Start relay mode on the current agent to accept downstream agents",
+		Usage:     "relay_start --addr 0.0.0.0:11602",
+		HelpGroup: "Relay",
+		Flags: func(f *grumble.Flags) {
+			f.StringL("addr", "0.0.0.0:11602", "The address:port the agent should listen on for downstream agents")
+		},
+		Run: func(c *grumble.Context) error {
+			if _, ok := AgentList[CurrentAgentID]; !ok {
+				return ErrInvalidAgent
+			}
+			currentAgent := AgentList[CurrentAgentID]
+			if currentAgent.Session == nil {
+				return ErrInvalidAgent
+			}
+			if !currentAgent.RelayCapable {
+				return errors.New("this agent does not support relay mode")
+			}
+			if currentAgent.RelayActive {
+				return fmt.Errorf("relay already active on %s", currentAgent.RelayListenAddr)
+			}
+
+			fingerprint, err := currentAgent.StartRelay(c.Flags.String("addr"))
+			if err != nil {
+				return fmt.Errorf("could not start relay: %v", err)
+			}
+
+			logrus.Infof("Relay started on agent %s at %s", currentAgent.Name, c.Flags.String("addr"))
+			logrus.Infof("TLS Certificate fingerprint: %s", fingerprint)
+			logrus.Infof("Downstream agents can connect with: ./agent -connect <agent_ip>:%s -ignore-cert", strings.Split(c.Flags.String("addr"), ":")[len(strings.Split(c.Flags.String("addr"), ":"))-1])
+
+			// Start listening for downstream agent notifications
+			go currentAgent.HandleRelayNotifications(ChainMgr, func(agent *controller.LigoloAgent) error {
+				logrus.WithFields(logrus.Fields{
+					"name":    agent.Name,
+					"session": agent.SessionID,
+					"via":     currentAgent.Name,
+				}).Info("Downstream agent connected via relay")
+				return RegisterAgent(agent)
+			})
+
+			return nil
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
+		Name:      "relay_stop",
+		Help:      "Stop relay mode on the current agent",
+		Usage:     "relay_stop",
+		HelpGroup: "Relay",
+		Run: func(c *grumble.Context) error {
+			if _, ok := AgentList[CurrentAgentID]; !ok {
+				return ErrInvalidAgent
+			}
+			currentAgent := AgentList[CurrentAgentID]
+			if !currentAgent.RelayActive {
+				return errors.New("relay is not active on this agent")
+			}
+
+			downstream := ChainMgr.GetDownstreamSessionIDs(currentAgent.SessionID)
+			if len(downstream) > 0 {
+				if !ask(fmt.Sprintf("Stopping relay will disconnect %d downstream agent(s). Continue?", len(downstream))) {
+					return nil
+				}
+			}
+
+			return currentAgent.StopRelay()
+		},
+	})
+
+	App.AddCommand(&grumble.Command{
+		Name:      "chain_list",
+		Help:      "Show the relay chain topology",
+		Usage:     "chain_list",
+		HelpGroup: "Relay",
+		Run: func(c *grumble.Context) error {
+			AgentListMutex.Lock()
+			var agents []proxy.AgentInfo
+			for _, agent := range AgentList {
+				agents = append(agents, proxy.AgentInfo{
+					Name:        agent.Name,
+					SessionID:   agent.SessionID,
+					RelayActive: agent.RelayActive,
+					Alive:       agent.Alive(),
+				})
+			}
+			AgentListMutex.Unlock()
+
+			App.Println(ChainMgr.RenderTree(agents))
 			return nil
 		},
 	})

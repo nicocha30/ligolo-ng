@@ -63,6 +63,7 @@ tunnels from a reverse TCP/TLS connection using a **tun interface** (without the
 - Reverse/Bind Connection
 - Automatic tunnel/listeners recovery (in case of network issues)
 - Websocket support
+- **Multi-hop agent chaining** for pivoting through segmented networks
 
 ## Demo
 
@@ -124,6 +125,41 @@ Connecting to host 10.10.0.1, port 24483
 [  5]   0.00-10.08  sec   125 MBytes   104 Mbits/sec                  receiver
 ```
 
+## Multi-Hop Agent Chaining
+
+Ligolo-ng supports relay mode, allowing agents to act as lightweight TLS relays for downstream agents. This enables pivoting through segmented networks where some hosts cannot reach the proxy directly.
+
+```
+Proxy <---> Agent A (relay) <---> Agent B ---> Target Network
+```
+
+**Setup:**
+
+1. Select an agent and start relay mode:
+```
+ligolo-ng » session             # select Agent A
+[Agent: user@DMZ] » relay_start --addr 0.0.0.0:11602
+```
+
+2. On the target host (in Agent A's network), connect through the relay:
+```
+./agent -connect <AgentA_IP>:11602 -ignore-cert
+```
+
+3. Agent B auto-registers on the proxy and can be used like any other agent (tunnels, listeners, etc.).
+
+**Commands:**
+- `relay_start --addr <ip:port>` - Start relay listener on the current agent
+- `relay_stop` - Stop relay on the current agent
+- `chain_list` - Display the relay chain topology
+
+**API endpoints:**
+- `POST /api/v1/relay/:id` - Start relay (body: `{"ListenAddr": "0.0.0.0:11602"}`)
+- `DELETE /api/v1/relay/:id` - Stop relay
+- `GET /api/v1/chains` - Get chain topology
+
+The maximum chain depth is 5 hops. Session recovery is supported across the full chain.
+
 ## Caveats
 
 Because the *agent* is running without privileges, it's not possible to forward raw packets.
@@ -135,7 +171,8 @@ When using *nmap*, you should use `--unprivileged` or `-PE` to avoid false posit
 
 - Implement other ICMP error messages (this will speed up UDP scans) ;
 - Do not *RST* when receiving an *ACK* from an invalid TCP connection (nmap will report the host as up) ;
-- Add mTLS support.
+- Add mTLS support ;
+- ~~Multi-hop agent chaining~~ (done).
 
 ## Credits
 

@@ -119,34 +119,34 @@ func init() {
 		Run: func(c *grumble.Context) error {
 			ifName := c.Flags.String("name")
 			ifID := c.Flags.Int("id")
-			
+
 			// If neither name nor ID provided, show error
 			if ifName == "" && ifID == -1 {
 				return errors.New("please specify either --name [interface] or --id [number]")
 			}
-			
+
 			// If ID is provided, look up the interface name
 			if ifID != -1 {
 				interfaces, err := config.GetInterfaceConfigState()
 				if err != nil {
 					return err
 				}
-				
+
 				// Sort interface names to match interface_list ordering
 				var interfaceNames []string
 				for name := range interfaces {
 					interfaceNames = append(interfaceNames, name)
 				}
 				sort.Strings(interfaceNames)
-				
+
 				if ifID < 0 || ifID >= len(interfaceNames) {
 					return fmt.Errorf("invalid interface ID: %d. Use 'interface_list' to see valid IDs", ifID)
 				}
-				
+
 				ifName = interfaceNames[ifID]
 				logrus.Infof("Deleting interface #%d: %s", ifID, ifName)
 			}
-			
+
 			if config.GetInterfaceConfig(ifName) != nil {
 				if ask("Remove all interface routes and settings from config?") {
 					if err := config.DeleteInterfaceConfig(ifName); err != nil {
@@ -340,12 +340,12 @@ func init() {
 
 			var selectedIface string
 			customName := c.Flags.String("interface")
-			
+
 			// If --interface flag is provided, use it directly without prompting
 			if customName != "" {
 				logrus.Infof("Using custom interface name: %s", customName)
 				selectedIface = customName
-				
+
 				// Check if interface physically exists
 				if netinfo.InterfaceExist(selectedIface) {
 					logrus.Warnf("Interface %s already exists physically", selectedIface)
@@ -376,13 +376,13 @@ func init() {
 					if err := survey.AskOne(ifaceNamePrompt, &customIfaceName); err != nil {
 						return err
 					}
-					
+
 					var ifName string
 					if customIfaceName != "" {
 						// User provided a custom name
 						ifName = customIfaceName
 						logrus.Infof("Using custom interface name: %s", ifName)
-						
+
 						// Check if it already exists
 						if netinfo.InterfaceExist(ifName) {
 							logrus.Warnf("Interface %s already exists physically", ifName)
@@ -402,7 +402,7 @@ func init() {
 						}
 
 						ifName = codenames.Generate(rng)
-						
+
 						// Make sure the randomly generated name doesn't already exist
 						for netinfo.InterfaceExist(ifName) {
 							logrus.Warnf("Interface %s already exists, generating a new name...", ifName)
@@ -450,7 +450,7 @@ func init() {
 					}
 
 					selectedIface = ifaceMap[selectedIfaceDisplay]
-					
+
 					// Check if the selected existing interface is being used by another agent
 					for _, agent := range AgentList {
 						if agent.Running && agent.Interface == selectedIface && agent != CurrentAgent {
@@ -470,7 +470,7 @@ func init() {
 						break
 					}
 				}
-				
+
 				if !interfaceInUse {
 					logrus.Warnf("Interface %s exists but is not in use. Removing it to avoid conflicts...", selectedIface)
 					stun, err := netinfo.GetTunByName(selectedIface)
