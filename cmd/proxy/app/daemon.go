@@ -17,6 +17,7 @@
 package app
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/static"
@@ -390,6 +391,61 @@ func StartLigoloApi() {
 
 		apiv1.GET("/agents", func(c *gin.Context) {
 			c.IndentedJSON(http.StatusOK, AgentList)
+		})
+
+		apiv1.DELETE("/agents/:id", func(c *gin.Context) {
+			agentParam := c.Param("id")
+			agentId, err := strconv.Atoi(agentParam)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, inputError)
+				return
+			}
+			// Look up under the lock (AgentList is a plain map guarded by AgentListMutex).
+			AgentListMutex.Lock()
+			agent, ok := AgentList[agentId]
+			AgentListMutex.Unlock()
+			if !ok {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid agent"})
+				return
+			}
+			// Stop the tunnel (route cleanup) and kill the live agent WITHOUT holding the
+			// lock: both can block / do network I/O, and the tunnel watchdog also takes it.
+			if agent.Running {
+				select {
+				case agent.CloseChan <- true:
+				default:
+				}
+				agent.Running = false
+			}
+			// Best-effort: ask a still-alive agent to terminate its process.
+			if agent.Alive() {
+				if err := agent.Kill(); err != nil {
+					logrus.Debugf("kill during agent removal (id %d) failed: %v", agentId, err)
+				}
+			}
+			// Purge the entry under the lock. ligolo otherwise never calls
+			// delete(AgentList, ...) anywhere, so dead/stale sessions linger until a
+			// proxy restart; this is what clears them.
+			AgentListMutex.Lock()
+			delete(AgentList, agentId)
+			AgentListMutex.Unlock()
+			c.JSON(http.StatusOK, gin.H{"message": "agent removed"})
+		})
+
+		apiv1.GET("/certificate", func(c *gin.Context) {
+			selfcrt, err := ProxyController.GetSelfCertificateSignature()
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if selfcrt == nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "certificate is nil"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"domain":      ProxyController.CertManagerConfig.SelfcertDomain,
+				"fingerprint": fmt.Sprintf("%X", sha256.Sum256(selfcrt.Certificate[0])),
+			})
 		})
 
 		apiv1.DELETE("/tunnel/:id", func(c *gin.Context) {

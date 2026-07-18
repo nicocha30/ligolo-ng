@@ -110,17 +110,26 @@ func (la *LigoloAgent) MarshalJSON() ([]byte, error) {
 		RemoteAddr string
 		Interface  string
 		Running    bool
+		Online     bool
 		Listeners  []*proxy.LigoloListener
+	}
+
+	// RemoteAddr is nil-safe: an agent whose session has gone away is still listed
+	// (Online will be false), and must not panic when serialized.
+	remoteAddr := ""
+	if la.Session != nil {
+		remoteAddr = la.Session.RemoteAddr().String()
 	}
 
 	return json.Marshal(Session{
 		Name:       la.Name,
 		Running:    la.Running,
+		Online:     la.Alive(),
 		Listeners:  la.Listeners,
 		Network:    la.Network,
 		Interface:  la.Interface,
 		SessionID:  la.SessionID,
-		RemoteAddr: la.Session.RemoteAddr().String(),
+		RemoteAddr: remoteAddr,
 	})
 }
 
