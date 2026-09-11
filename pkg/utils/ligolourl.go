@@ -58,6 +58,17 @@ func ParseLigoloURL(rawURL string) (*LigoloURL, error) {
 		return nil, err
 	}
 
+	// "host:port" with a letter-only host is parsed as scheme:opaque, and a
+	// bare "host" is parsed as a path — both leave Host empty (no ServerName,
+	// no SNI, failed cert validation in the agent). Reparse as an
+	// authority-only URL whenever nothing sensible was found and the input
+	// does not use an explicit scheme:// form.
+	if u.Host == "" && !strings.Contains(rawURL, "://") {
+		if u2, err2 := url.Parse("//" + rawURL); err2 == nil && u2.Host != "" {
+			return &LigoloURL{u2}, nil
+		}
+	}
+
 	return &LigoloURL{u}, nil
 }
 
