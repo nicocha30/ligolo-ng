@@ -61,6 +61,7 @@ func main() {
 	var serverAddr = flag.String("connect", "", "connect to proxy (domain:port)")
 	var bindAddr = flag.String("bind", "", "bind to ip:port")
 	var userAgent = flag.String("ua", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36", "HTTP User-Agent")
+	var maxConnections = flag.Int("max-connections", 1024, "maximum number of concurrent relayed connections, protects against file descriptor exhaustion during scanning (0 = unlimited)")
 	var versionFlag = flag.Bool("version", false, "show the current version")
 
 	flag.Usage = func() {
@@ -83,6 +84,11 @@ func main() {
 	if *verbose {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
+
+	// Cap concurrent relayed connections to avoid exhausting file descriptors
+	// when a large network is scanned through the tunnel. Must run before bind(),
+	// which never returns in listener mode.
+	agent.SetConnectionLimit(*maxConnections)
 
 	if *bindAddr != "" {
 		bind(&tlsConfig, *bindAddr)
