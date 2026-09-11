@@ -24,6 +24,7 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"sync"
 	"syscall"
 	"time"
 
@@ -36,16 +37,87 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// stateMu guards the reverse-listener bookkeeping below (listenerConntrack,
+// listenerMap, connTrackID, listenerID). These are accessed concurrently from
+// multiple HandleConn goroutines and from each listener's ListenAndServe
+// goroutine; without synchronization concurrent map writes crash the agent with
+// a fatal "concurrent map writes" runtime error.
+var stateMu sync.Mutex
 var listenerConntrack map[int32]net.Conn
 var listenerMap map[int32]interface{}
 var connTrackID int32
 var listenerID int32
 var sessionID string
 
+// connSem bounds the number of simultaneous outbound relayed connections. It is
+// nil (unlimited) unless SetConnectionLimit installs a bounded semaphore. This
+// prevents a fast scan from spawning thousands of concurrent dials and
+// exhausting the agent's file descriptors.
+var connSem chan struct{}
+
 func init() {
 	listenerConntrack = make(map[int32]net.Conn)
 	listenerMap = make(map[int32]interface{})
 	sessionID = hex.EncodeToString(uuid.NodeID())
+}
+
+// SetConnectionLimit caps the number of concurrent outbound relayed connections
+// the agent will handle at once. A value of n <= 0 means unlimited. It must be
+// called once at startup before any connection is accepted.
+func SetConnectionLimit(n int) {
+	if n > 0 {
+		connSem = make(chan struct{}, n)
+	} else {
+		connSem = nil
+	}
+}
+
+// registerConn stores an accepted reverse-listener connection under a fresh id
+// and returns that id. The store happens before the id is published so a lookup
+// racing the publish always finds the connection.
+func registerConn(conn net.Conn) int32 {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	connTrackID++
+	id := connTrackID
+	listenerConntrack[id] = conn
+	return id
+}
+
+// getConn returns the tracked connection for id, and whether it was present.
+func getConn(id int32) (net.Conn, bool) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	conn, ok := listenerConntrack[id]
+	return conn, ok
+}
+
+// deleteConn removes a tracked connection.
+func deleteConn(id int32) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	delete(listenerConntrack, id)
+}
+
+// registerListener stores a listener under a fresh id and returns that id.
+func registerListener(l interface{}) int32 {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	id := listenerID
+	listenerID++
+	listenerMap[id] = l
+	return id
+}
+
+// takeListener removes and returns the listener for id, and whether it existed.
+func takeListener(id int32) (interface{}, bool) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	l, ok := listenerMap[id]
+	if ok {
+		delete(listenerMap, id)
+	}
+	return l, ok
 }
 
 // Listener is the base class implementing listener sockets for Ligolo
@@ -69,9 +141,7 @@ func (s *Listener) ListenAndServe(connTrackChan chan int32) error {
 		if err != nil {
 			return err
 		}
-		connTrackID++
-		connTrackChan <- connTrackID
-		listenerConntrack[connTrackID] = conn
+		connTrackChan <- registerConn(conn)
 	}
 }
 
@@ -100,6 +170,20 @@ func NewUDPListener(network string, addr string) (UDPListener, error) {
 }
 
 func HandleConn(conn net.Conn) {
+	// Close the yamux stream on return for all one-shot request types. Without
+	// this, the proxy's FIN only moves the stream to a half-closed state on the
+	// agent and it is never reaped from the session, leaking a stream (and its
+	// window buffer) per failed probe. Branches that hand conn off to a
+	// background relay goroutine set handoff = true to retain ownership; closing
+	// an already-closed yamux stream is a no-op, so this is safe on the
+	// synchronous relay paths too.
+	handoff := false
+	defer func() {
+		if !handoff {
+			_ = conn.Close()
+		}
+	}()
+
 	decoder := protocol.NewDecoder(conn)
 	if err := decoder.Decode(); err != nil {
 		logrus.Error(err)
@@ -110,6 +194,13 @@ func HandleConn(conn net.Conn) {
 	switch decoder.Payload.(type) {
 
 	case *protocol.ConnectRequestPacket:
+		// Bound concurrent outbound dials/relays to avoid file-descriptor
+		// exhaustion during aggressive scanning. The slot is held for the
+		// lifetime of the relay and released when HandleConn returns.
+		if connSem != nil {
+			connSem <- struct{}{}
+			defer func() { <-connSem }()
+		}
 		connRequest := e.Payload.(*protocol.ConnectRequestPacket)
 		encoder := protocol.NewEncoder(conn)
 
@@ -209,15 +300,14 @@ func HandleConn(conn net.Conn) {
 		encoder := protocol.NewEncoder(conn)
 
 		var err error
-		if lis, ok := listenerMap[closeRequest.ListenerID]; ok {
+		// takeListener removes the entry under lock; close outside the lock.
+		if lis, ok := takeListener(closeRequest.ListenerID); ok {
 			if l, ok := lis.(net.Listener); ok {
 				l.Close()
 			}
 			if l, ok := lis.(*net.UDPConn); ok {
 				l.Close()
 			}
-			// Remove closed listener from map to avoid leaks
-			delete(listenerMap, closeRequest.ListenerID)
 		} else {
 			err = errors.New("invalid listener id")
 		}
@@ -252,9 +342,9 @@ func HandleConn(conn net.Conn) {
 				}
 				return
 			}
-			listenerMap[listenerID] = listener.Listener
+			id := registerListener(listener.Listener)
 			listenerResponse := protocol.ListenerResponsePacket{
-				ListenerID: listenerID,
+				ListenerID: id,
 				Err:        false,
 				ErrString:  "",
 			}
@@ -281,15 +371,18 @@ func HandleConn(conn net.Conn) {
 				}
 				return
 			}
-			listenerMap[listenerID] = udplistener.UDPConn
+			id := registerListener(udplistener.UDPConn)
 			listenerResponse := protocol.ListenerResponsePacket{
-				ListenerID: listenerID,
+				ListenerID: id,
 				Err:        false,
 				ErrString:  "",
 			}
 			if err := encoder.Encode(listenerResponse); err != nil {
 				logrus.Error(err)
 			}
+			// The relay goroutine owns conn for the lifetime of the UDP listener
+			// and closes it itself, so skip the deferred close in HandleConn.
+			handoff = true
 			go func() {
 				err := relay.StartUDPListenerRelay(conn, udplistener.UDPConn)
 				if err != nil {
@@ -298,7 +391,6 @@ func HandleConn(conn net.Conn) {
 			}()
 		}
 
-		listenerID++
 		if listenRequest.Network == "tcp" {
 			for {
 				var bindResponse protocol.ListenerBindReponse
@@ -331,7 +423,8 @@ func HandleConn(conn net.Conn) {
 		socketEncDec := protocol.NewEncoderDecoder(conn)
 
 		var sockResponse protocol.ListenerSockResponsePacket
-		if _, ok := listenerConntrack[sockRequest.SockID]; !ok {
+		netConn, ok := getConn(sockRequest.SockID)
+		if !ok {
 			// Handle error
 			sockResponse.ErrString = "invalid or unexistant SockID"
 			sockResponse.Err = true
@@ -350,20 +443,19 @@ func HandleConn(conn net.Conn) {
 			logrus.Error(err)
 			return
 		}
-		netConn := listenerConntrack[sockRequest.SockID]
 
 		ready, err := protocol.PayloadAs[protocol.ListenerSocketConnectionReady](socketEncDec.Payload)
 		if err != nil {
 			logrus.Error(err)
 			netConn.Close()
-			delete(listenerConntrack, sockRequest.SockID)
+			deleteConn(sockRequest.SockID)
 			return
 		}
 
 		if err := ready.Err; err != false {
 			logrus.Debug("Socket relay session failed: error from proxy")
 			netConn.Close()
-			delete(listenerConntrack, sockRequest.SockID)
+			deleteConn(sockRequest.SockID)
 			return
 		}
 
@@ -372,7 +464,7 @@ func HandleConn(conn net.Conn) {
 			logrus.Error(err)
 		}
 		netConn.Close()
-		delete(listenerConntrack, sockRequest.SockID)
+		deleteConn(sockRequest.SockID)
 
 	case *protocol.AgentKillRequestPacket:
 		os.Exit(0)
